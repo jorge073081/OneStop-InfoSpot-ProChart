@@ -186,3 +186,72 @@ export function rsi(bars, period = 14) {
   }
   return out;
 }
+
+
+export function stoch(bars, kPeriod = 14, dPeriod = 3) {
+  if (!bars?.length || bars.length < kPeriod) return { k: [], d: [] };
+  const k = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (i < kPeriod - 1) continue;
+    const slice = bars.slice(i - kPeriod + 1, i + 1);
+    const hh = Math.max(...slice.map((b) => b.high));
+    const ll = Math.min(...slice.map((b) => b.low));
+    const den = hh - ll;
+    const val = den === 0 ? 50 : ((bars[i].close - ll) / den) * 100;
+    k.push({ time: bars[i].time, value: val });
+  }
+  // %D = SMA of %K
+  const d = [];
+  let sum = 0;
+  for (let i = 0; i < k.length; i++) {
+    sum += k[i].value;
+    if (i >= dPeriod) sum -= k[i - dPeriod].value;
+    if (i >= dPeriod - 1) {
+      d.push({ time: k[i].time, value: sum / dPeriod });
+    }
+  }
+  return { k, d };
+}
+
+export function atr(bars, period = 14) {
+  if (!bars?.length || bars.length < 2) return [];
+  const trs = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (i === 0) {
+      trs.push(bars[i].high - bars[i].low);
+      continue;
+    }
+    const tr = Math.max(
+      bars[i].high - bars[i].low,
+      Math.abs(bars[i].high - bars[i - 1].close),
+      Math.abs(bars[i].low - bars[i - 1].close)
+    );
+    trs.push(tr);
+  }
+  const out = [];
+  let sum = 0;
+  for (let i = 0; i < trs.length; i++) {
+    sum += trs[i];
+    if (i >= period) sum -= trs[i - period];
+    if (i >= period - 1) {
+      out.push({ time: bars[i].time, value: sum / period });
+    }
+  }
+  return out;
+}
+
+/** Cumulative VWAP from start of loaded bars (approx session VWAP on lower TFs). */
+export function vwap(bars) {
+  if (!bars?.length) return [];
+  const out = [];
+  let cumPV = 0;
+  let cumV = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const typ = (bars[i].high + bars[i].low + bars[i].close) / 3;
+    const vol = bars[i].volume || 0;
+    cumPV += typ * vol;
+    cumV += vol;
+    if (cumV > 0) out.push({ time: bars[i].time, value: cumPV / cumV });
+  }
+  return out;
+}

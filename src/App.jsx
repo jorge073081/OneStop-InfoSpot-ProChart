@@ -25,20 +25,74 @@ function writeParams(symbol, interval) {
   const q = new URLSearchParams();
   q.set("symbol", symbol);
   q.set("interval", interval);
-  const url = `${window.location.pathname}?${q.toString()}`;
+  const url = window.location.pathname + "?" + q.toString();
   window.history.replaceState({}, "", url);
 }
+
+function toolHintText(drawTool, trendDraft) {
+  const points = trendDraft && trendDraft.points ? trendDraft.points.length : 0;
+  switch (drawTool) {
+    case "hline":
+      return "Click to place solid horizontal line";
+    case "hline_dot":
+      return "Click to place dashed horizontal line";
+    case "vline":
+      return "Click to place vertical marker";
+    case "trend":
+      return points ? "Click 2nd point - trend line" : "Click 1st point - trend line";
+    case "ray":
+      return points ? "Click direction point - ray" : "Click start of ray";
+    case "extend":
+      return points ? "Click 2nd point - extended line" : "Click 1st point - extended line";
+    case "rect":
+      return points ? "Click opposite corner - rectangle" : "Click first corner - rectangle";
+    case "fib":
+      return points ? "Click 2nd swing - Fib retracement" : "Click 1st swing - Fib";
+    case "fibext":
+      return points ? "Click 2nd swing - Fib extension" : "Click 1st swing - Fib Ext";
+    case "channel":
+      if (!points) return "Channel: click point 1 (base start)";
+      if (points === 1) return "Channel: click point 2 (base end)";
+      return "Channel: click point 3 (parallel width)";
+    case "measure":
+      return points ? "Click end - measure % move" : "Click start - measure tool";
+    case "long":
+      return "Click to mark long / buy";
+    case "short":
+      return "Click to mark short / sell";
+    default:
+      return "Draw mode";
+  }
+}
+
+const DRAW_TOOLS = [
+  ["none", "Navigate"],
+  ["hline", "H-Line"],
+  ["hline_dot", "H-Dash"],
+  ["vline", "V-Line"],
+  ["trend", "Trend"],
+  ["ray", "Ray"],
+  ["extend", "Extend"],
+  ["rect", "Rect"],
+  ["fib", "Fib"],
+  ["fibext", "Fib Ext"],
+  ["channel", "Channel"],
+  ["measure", "Measure"],
+  ["long", "Long"],
+  ["short", "Short"],
+];
 
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
   const [symbol, setSymbol] = useState(initial.symbol);
-  const [interval, setInterval] = useState(initial.interval);
+  const [interval, setTf] = useState(initial.interval);
   const [bars, setBars] = useState([]);
   const [dataSource, setDataSource] = useState("coinbase");
-  const [status, setStatus] = useState("Loading…");
-  const [liveState, setLiveState] = useState("Connecting…");
+  const [status, setStatus] = useState("Loading...");
+  const [liveState, setLiveState] = useState("Connecting...");
   const [error, setError] = useState("");
+
   const [showIndBox, setShowIndBox] = useState(false);
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
@@ -52,23 +106,22 @@ export default function App() {
   const [showStoch, setShowStoch] = useState(false);
   const [showAtr, setShowAtr] = useState(false);
 
-  // Drawing tools (client-side — free, no TV)
   const [showDrawBox, setShowDrawBox] = useState(false);
   const [drawTool, setDrawTool] = useState("none");
   const [drawings, setDrawings] = useState([]);
-  // draft: null | { points: [{time,price}, ...] } for multi-click tools
   const [trendDraft, setTrendDraft] = useState(null);
 
   const load = useCallback(async (sym, tf) => {
-    setStatus("Loading…");
+    setStatus("Loading...");
     setError("");
     setDrawings([]);
     setTrendDraft(null);
     setDrawTool("none");
-    // keep showDrawBox as user preference
     try {
       const binanceInterval = INTERVALS.find((i) => i.id === tf)?.binance || "1d";
-      const { bars: data, source } = await fetchOHLCV(sym, binanceInterval, 500);
+      const result = await fetchOHLCV(sym, binanceInterval, 500);
+      const data = result.bars;
+      const source = result.source;
       setBars(data);
       setDataSource(source);
       writeParams(sym, tf);
@@ -76,7 +129,7 @@ export default function App() {
       const prev = data[data.length - 2];
       const chg = prev ? ((last.close / prev.close - 1) * 100).toFixed(2) : "0.00";
       const sign = Number(chg) >= 0 ? "+" : "";
-      setStatus(`${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${sign}${chg}%)`);
+      setStatus(displaySymbol(sym) + " · " + tf.toUpperCase() + " · last " + last.close + " (" + sign + chg + "%)");
     } catch (e) {
       setBars([]);
       setError(e.message || String(e));
@@ -97,7 +150,7 @@ export default function App() {
 
     const connectCoinbase = () => {
       if (isCancelled) return;
-      setLiveState("Connecting…");
+      setLiveState("Connecting...");
       const product = toCoinbaseProduct(symbol);
       const bucketSec = INTERVAL_SECONDS[interval] || 86400;
 
@@ -112,7 +165,7 @@ export default function App() {
             channels: ["ticker"],
           })
         );
-        setLiveState("● LIVE (Coinbase)");
+        setLiveState("LIVE (Coinbase)");
       };
 
       ws.onmessage = (event) => {
@@ -122,7 +175,9 @@ export default function App() {
 
           const price = parseFloat(msg.price);
           const tradeSize = parseFloat(msg.last_size || 0);
-          const tradeTime = msg.time ? Math.floor(new Date(msg.time).getTime() / 1000) : Math.floor(Date.now() / 1000);
+          const tradeTime = msg.time
+            ? Math.floor(new Date(msg.time).getTime() / 1000)
+            : Math.floor(Date.now() / 1000);
           const candleStart = Math.floor(tradeTime / bucketSec) * bucketSec;
 
           setBars((prevBars) => {
@@ -137,7 +192,7 @@ export default function App() {
                 close: price,
                 volume: lastBar.volume + tradeSize,
               };
-              const updated = [...prevBars];
+              const updated = prevBars.slice();
               updated[updated.length - 1] = updatedBar;
               return updated;
             } else if (candleStart > lastBar.time) {
@@ -149,20 +204,20 @@ export default function App() {
                 close: price,
                 volume: tradeSize,
               };
-              return [...prevBars.slice(1), newBar];
+              return prevBars.slice(1).concat([newBar]);
             }
             return prevBars;
           });
-        } catch {}
+        } catch (_) {}
       };
 
       ws.onerror = () => {
-        if (!isCancelled) setLiveState("Reconnecting…");
+        if (!isCancelled) setLiveState("Reconnecting...");
       };
 
       ws.onclose = () => {
         if (!isCancelled) {
-          setLiveState("Reconnecting…");
+          setLiveState("Reconnecting...");
           reconnectTimer = setTimeout(connectCoinbase, 3000);
         }
       };
@@ -170,13 +225,13 @@ export default function App() {
 
     const connectBinance = () => {
       if (isCancelled) return;
-      setLiveState("Connecting…");
+      setLiveState("Connecting...");
       const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
-      const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
-      ws = new WebSocket(`wss://stream.binance.us:9443/ws/${streamName}`);
+      const streamName = symbol.toLowerCase() + "@kline_" + binanceInterval;
+      ws = new WebSocket("wss://stream.binance.us:9443/ws/" + streamName);
 
       ws.onopen = () => {
-        if (!isCancelled) setLiveState("● LIVE (Binance.US)");
+        if (!isCancelled) setLiveState("LIVE (Binance.US)");
       };
 
       ws.onmessage = (event) => {
@@ -197,24 +252,24 @@ export default function App() {
             if (!prevBars.length) return prevBars;
             const lastBar = prevBars[prevBars.length - 1];
             if (lastBar.time === liveBar.time) {
-              const updated = [...prevBars];
+              const updated = prevBars.slice();
               updated[updated.length - 1] = liveBar;
               return updated;
             } else if (liveBar.time > lastBar.time) {
-              return [...prevBars.slice(1), liveBar];
+              return prevBars.slice(1).concat([liveBar]);
             }
             return prevBars;
           });
-        } catch {}
+        } catch (_) {}
       };
 
       ws.onerror = () => {
-        if (!isCancelled) setLiveState("Reconnecting…");
+        if (!isCancelled) setLiveState("Reconnecting...");
       };
 
       ws.onclose = () => {
         if (!isCancelled) {
-          setLiveState("Reconnecting…");
+          setLiveState("Reconnecting...");
           reconnectTimer = setTimeout(connectBinance, 3000);
         }
       };
@@ -244,9 +299,23 @@ export default function App() {
 
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2];
-  const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
+  const chgPct = last && prev ? (last.close / prev.close - 1) * 100 : null;
   const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
   const chgText = chgPct != null ? chgPct.toFixed(2) : "0.00";
+
+  const indicatorItems = [
+    { label: "SMA 50", val: showSma50, set: setShowSma50 },
+    { label: "SMA 200", val: showSma200, set: setShowSma200 },
+    { label: "EMA 9", val: showEma9, set: setShowEma9 },
+    { label: "EMA 21", val: showEma21, set: setShowEma21 },
+    { label: "EMA 50", val: showEma50, set: setShowEma50 },
+    { label: "BB", val: showBb, set: setShowBb },
+    { label: "VWAP", val: showVwap, set: setShowVwap },
+    { label: "RSI", val: showRsi, set: setShowRsi },
+    { label: "MACD", val: showMacd, set: setShowMacd },
+    { label: "Stoch", val: showStoch, set: setShowStoch },
+    { label: "ATR", val: showAtr, set: setShowAtr },
+  ];
 
   return (
     <div className="app">
@@ -268,8 +337,8 @@ export default function App() {
             <button
               key={i.id}
               type="button"
-              className={`interval-btn${interval === i.id ? " active" : ""}`}
-              onClick={() => setInterval(i.id)}
+              className={"interval-btn" + (interval === i.id ? " active" : "")}
+              onClick={() => setTf(i.id)}
             >
               {i.label}
             </button>
@@ -279,7 +348,7 @@ export default function App() {
         <div className="intervals">
           <button
             type="button"
-            className={`interval-btn${showIndBox ? " active" : ""}`}
+            className={"interval-btn" + (showIndBox ? " active" : "")}
             onClick={() => setShowIndBox((v) => !v)}
           >
             {showIndBox ? "Hide indicators" : "Indicators"}
@@ -288,21 +357,14 @@ export default function App() {
 
         {showIndBox ? (
           <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 560 }}>
-            {[
-              ["SMA 50", showSma50, setShowSma50],
-              ["SMA 200", showSma200, setShowSma200],
-              ["EMA 9", showEma9, setShowEma9],
-              ["EMA 21", showEma21, setShowEma21],
-              ["EMA 50", showEma50, setShowEma50],
-              ["BB", showBb, setShowBb],
-              ["VWAP", showVwap, setShowVwap],
-              ["RSI", showRsi, setShowRsi],
-              ["MACD", showMacd, setShowMacd],
-              ["Stoch", showStoch, setShowStoch],
-              ["ATR", showAtr, setShowAtr],
-            ].map(([label, val, set]) => (
-              <label key={label} className="hint" style={{ marginRight: 6 }}>
-                <input type="checkbox" checked={val} onChange={(e) => set(e.target.checked)} /> {label}
+            {indicatorItems.map((item) => (
+              <label key={item.label} className="hint" style={{ marginRight: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={item.val}
+                  onChange={(e) => item.set(e.target.checked)}
+                />{" "}
+                {item.label}
               </label>
             ))}
           </div>
@@ -311,7 +373,7 @@ export default function App() {
         <div className="intervals">
           <button
             type="button"
-            className={`interval-btn${showDrawBox ? " active" : ""}`}
+            className={"interval-btn" + (showDrawBox ? " active" : "")}
             onClick={() => {
               setShowDrawBox((v) => !v);
               if (showDrawBox) {
@@ -326,34 +388,23 @@ export default function App() {
 
         {showDrawBox ? (
           <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 520 }}>
-            {[
-              ["none", "Navigate"],
-              ["hline", "H-Line"],
-              ["hline_dot", "H-Dash"],
-              ["vline", "V-Line"],
-              ["trend", "Trend"],
-              ["ray", "Ray"],
-              ["extend", "Extend"],
-              ["rect", "Rect"],
-              ["fib", "Fib"],
-              ["fibext", "Fib Ext"],
-              ["channel", "Channel"],
-              ["measure", "Measure"],
-              ["long", "Long"],
-              ["short", "Short"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`interval-btn${drawTool === id ? " active" : ""}`}
-                onClick={() => {
-                  setDrawTool(id);
-                  setTrendDraft(null);
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            {DRAW_TOOLS.map((pair) => {
+              const id = pair[0];
+              const label = pair[1];
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={"interval-btn" + (drawTool === id ? " active" : "")}
+                  onClick={() => {
+                    setDrawTool(id);
+                    setTrendDraft(null);
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
             <button
               type="button"
               className="interval-btn"
@@ -371,42 +422,23 @@ export default function App() {
           {last ? (
             <>
               <strong>{last.close}</strong>{" "}
-              {chgPct != null && (
+              {chgPct != null ? (
                 <span className={chgPct >= 0 ? "up" : "down"}>
                   {chgSign}
                   {chgText}%
                 </span>
-              )}
+              ) : null}
             </>
           ) : (
-            "—"
+            "-"
           )}
         </div>
       </header>
 
-      {(showDrawBox && drawTool !== "none") ? (
+      {showDrawBox && drawTool !== "none" ? (
         <div className="status" style={{ borderTop: "none", paddingTop: 4, paddingBottom: 4 }}>
-          ✏️{" "}
-          {{
-            hline: "Click to place solid horizontal line",
-            hline_dot: "Click to place dashed horizontal line",
-            vline: "Click to place vertical marker",
-            trend: trendDraft ? "Click 2nd point — trend line" : "Click 1st point — trend line",
-            ray: trendDraft ? "Click direction point — ray" : "Click start of ray",
-            extend: trendDraft ? "Click 2nd point — extended line both ways" : "Click 1st point — extended line",
-            rect: trendDraft ? "Click opposite corner — rectangle" : "Click first corner — rectangle",
-            fib: trendDraft ? "Click 2nd swing — Fib retracement" : "Click 1st swing — Fib",
-            fibext: trendDraft ? "Click 2nd swing — Fib extension" : "Click 1st swing — Fib Ext",
-            channel: !trendDraft
-              ? "Channel: click point 1 (base start)"
-              : trendDraft.points?.length === 1
-                ? "Channel: click point 2 (base end)"
-                : "Channel: click point 3 (parallel width)",
-            measure: trendDraft ? "Click end — measure % and $ move" : "Click start — measure tool",
-            long: "Click to mark long / buy",
-            short: "Click to mark short / sell",
-          }[drawTool] || "Draw mode"}
-          {drawings.length ? ` · ${drawings.length} object(s)` : ""}
+          {toolHintText(drawTool, trendDraft)}
+          {drawings.length ? " · " + drawings.length + " object(s)" : ""}
         </div>
       ) : null}
 
@@ -427,30 +459,48 @@ export default function App() {
             showAtr={showAtr}
             drawTool={drawTool}
             drawings={drawings}
-            onAddDrawing={(d) => setDrawings((prev) => [...prev, d])}
+            onAddDrawing={(d) => setDrawings((prev) => prev.concat([d]))}
             trendDraft={trendDraft}
             onTrendDraft={setTrendDraft}
           />
         ) : (
-          <div className="chart-panel" style={{ display: "grid", placeItems: "center", color: "#8b9bb4" }}>
+          <div
+            className="chart-panel"
+            style={{ display: "grid", placeItems: "center", color: "#8b9bb4" }}
+          >
             {error || "No data"}
           </div>
         )}
       </main>
 
-      <footer className={`status${error ? " error" : ""}`}>
-        {error || (
+      <footer className={"status" + (error ? " error" : "")}>
+        {error ? (
+          error
+        ) : (
           <>
-            <span style={{ color: liveState.startsWith("● LIVE") ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
+            <span
+              style={{
+                color: liveState.indexOf("LIVE") === 0 ? "#26a69a" : "#8b9bb4",
+                fontWeight: 600,
+              }}
+            >
               {liveState}
             </span>
             {" · "}
             {last
-              ? `${displaySymbol(symbol)} · ${interval.toUpperCase()} · last ${last.close} (${chgSign}${chgText}%)`
+              ? displaySymbol(symbol) +
+                " · " +
+                interval.toUpperCase() +
+                " · last " +
+                last.close +
+                " (" +
+                chgSign +
+                chgText +
+                "%)"
               : status}
           </>
         )}
-        <span className="hint"> · Double-click chart to fit · $0 stack: LWC + Coinbase / Binance.US</span>
+        <span className="hint"> · Double-click chart to fit · free stack</span>
       </footer>
     </div>
   );

@@ -29,15 +29,38 @@ function writeParams(symbol, interval) {
   window.history.replaceState({}, "", url);
 }
 
+
+function toolHintText(drawTool, trendDraft) {
+  const n = trendDraft && trendDraft.points ? trendDraft.points.length : (trendDraft ? 1 : 0);
+  if (drawTool === "hline") return "Click to place solid horizontal line";
+  if (drawTool === "hline_dot") return "Click to place dashed horizontal line";
+  if (drawTool === "vline") return "Click to place vertical marker";
+  if (drawTool === "trend") return n ? "Click 2nd point - trend" : "Click 1st point - trend";
+  if (drawTool === "ray") return n ? "Click direction - ray" : "Click start - ray";
+  if (drawTool === "extend") return n ? "Click 2nd point - extend" : "Click 1st point - extend";
+  if (drawTool === "rect") return n ? "Click opposite corner - rect" : "Click first corner - rect";
+  if (drawTool === "fib") return n ? "Click 2nd swing - Fib" : "Click 1st swing - Fib";
+  if (drawTool === "fibext") return n ? "Click 2nd swing - Fib Ext" : "Click 1st swing - Fib Ext";
+  if (drawTool === "channel") {
+    if (!n) return "Channel: point 1";
+    if (n === 1) return "Channel: point 2";
+    return "Channel: point 3";
+  }
+  if (drawTool === "measure") return n ? "Click end - measure" : "Click start - measure";
+  if (drawTool === "long") return "Click to mark long";
+  if (drawTool === "short") return "Click to mark short";
+  return "Draw mode";
+}
+
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
   const [symbol, setSymbol] = useState(initial.symbol);
-  const [interval, setInterval] = useState(initial.interval);
+  const [interval, setTf] = useState(initial.interval);
   const [bars, setBars] = useState([]);
   const [dataSource, setDataSource] = useState("coinbase");
-  const [status, setStatus] = useState("Loading…");
-  const [liveState, setLiveState] = useState("Connecting…");
+  const [status, setStatus] = useState("Loading?");
+  const [liveState, setLiveState] = useState("Connecting?");
   const [error, setError] = useState("");
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
@@ -47,7 +70,7 @@ export default function App() {
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(false);
 
-  // Drawing tools (client-side — free, no TV)
+  // Drawing tools (client-side ? free, no TV)
   const [showDrawBox, setShowDrawBox] = useState(false);
   const [drawTool, setDrawTool] = useState("none");
   const [drawings, setDrawings] = useState([]);
@@ -55,7 +78,7 @@ export default function App() {
   const [trendDraft, setTrendDraft] = useState(null);
 
   const load = useCallback(async (sym, tf) => {
-    setStatus("Loading…");
+    setStatus("Loading?");
     setError("");
     setDrawings([]);
     setTrendDraft(null);
@@ -71,7 +94,7 @@ export default function App() {
       const prev = data[data.length - 2];
       const chg = prev ? ((last.close / prev.close - 1) * 100).toFixed(2) : "0.00";
       const sign = Number(chg) >= 0 ? "+" : "";
-      setStatus(`${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${sign}${chg}%)`);
+      setStatus(`${displaySymbol(sym)} ? ${tf.toUpperCase()} ? last ${last.close} (${sign}${chg}%)`);
     } catch (e) {
       setBars([]);
       setError(e.message || String(e));
@@ -92,7 +115,7 @@ export default function App() {
 
     const connectCoinbase = () => {
       if (isCancelled) return;
-      setLiveState("Connecting…");
+      setLiveState("Connecting?");
       const product = toCoinbaseProduct(symbol);
       const bucketSec = INTERVAL_SECONDS[interval] || 86400;
 
@@ -107,7 +130,7 @@ export default function App() {
             channels: ["ticker"],
           })
         );
-        setLiveState("● LIVE (Coinbase)");
+        setLiveState("? LIVE (Coinbase)");
       };
 
       ws.onmessage = (event) => {
@@ -152,12 +175,12 @@ export default function App() {
       };
 
       ws.onerror = () => {
-        if (!isCancelled) setLiveState("Reconnecting…");
+        if (!isCancelled) setLiveState("Reconnecting?");
       };
 
       ws.onclose = () => {
         if (!isCancelled) {
-          setLiveState("Reconnecting…");
+          setLiveState("Reconnecting?");
           reconnectTimer = setTimeout(connectCoinbase, 3000);
         }
       };
@@ -165,13 +188,13 @@ export default function App() {
 
     const connectBinance = () => {
       if (isCancelled) return;
-      setLiveState("Connecting…");
+      setLiveState("Connecting?");
       const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
       const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
       ws = new WebSocket(`wss://stream.binance.us:9443/ws/${streamName}`);
 
       ws.onopen = () => {
-        if (!isCancelled) setLiveState("● LIVE (Binance.US)");
+        if (!isCancelled) setLiveState("? LIVE (Binance.US)");
       };
 
       ws.onmessage = (event) => {
@@ -204,12 +227,12 @@ export default function App() {
       };
 
       ws.onerror = () => {
-        if (!isCancelled) setLiveState("Reconnecting…");
+        if (!isCancelled) setLiveState("Reconnecting?");
       };
 
       ws.onclose = () => {
         if (!isCancelled) {
-          setLiveState("Reconnecting…");
+          setLiveState("Reconnecting?");
           reconnectTimer = setTimeout(connectBinance, 3000);
         }
       };
@@ -264,7 +287,7 @@ export default function App() {
               key={i.id}
               type="button"
               className={`interval-btn${interval === i.id ? " active" : ""}`}
-              onClick={() => setInterval(i.id)}
+              onClick={() => setTf(i.id)}
             >
               {i.label}
             </button>
@@ -364,34 +387,15 @@ export default function App() {
               )}
             </>
           ) : (
-            "—"
+            "?"
           )}
         </div>
       </header>
 
-      {(showDrawBox && drawTool !== "none") ? (
+      {showDrawBox && drawTool !== "none" ? (
         <div className="status" style={{ borderTop: "none", paddingTop: 4, paddingBottom: 4 }}>
-          ✏️{" "}
-          {{
-            hline: "Click to place solid horizontal line",
-            hline_dot: "Click to place dashed horizontal line",
-            vline: "Click to place vertical marker",
-            trend: trendDraft ? "Click 2nd point — trend line" : "Click 1st point — trend line",
-            ray: trendDraft ? "Click direction point — ray" : "Click start of ray",
-            extend: trendDraft ? "Click 2nd point — extended line both ways" : "Click 1st point — extended line",
-            rect: trendDraft ? "Click opposite corner — rectangle" : "Click first corner — rectangle",
-            fib: trendDraft ? "Click 2nd swing — Fib retracement" : "Click 1st swing — Fib",
-            fibext: trendDraft ? "Click 2nd swing — Fib extension" : "Click 1st swing — Fib Ext",
-            channel: !trendDraft
-              ? "Channel: click point 1 (base start)"
-              : trendDraft.points?.length === 1
-                ? "Channel: click point 2 (base end)"
-                : "Channel: click point 3 (parallel width)",
-            measure: trendDraft ? "Click end — measure % and $ move" : "Click start — measure tool",
-            long: "Click to mark long / buy",
-            short: "Click to mark short / sell",
-          }[drawTool] || "Draw mode"}
-          {drawings.length ? ` · ${drawings.length} object(s)` : ""}
+          {toolHintText(drawTool, trendDraft)}
+          {drawings.length ? " | " + drawings.length + " object(s)" : ""}
         </div>
       ) : null}
 
@@ -422,16 +426,16 @@ export default function App() {
       <footer className={`status${error ? " error" : ""}`}>
         {error || (
           <>
-            <span style={{ color: liveState.startsWith("● LIVE") ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
+            <span style={{ color: liveState.startsWith("? LIVE") ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
               {liveState}
             </span>
-            {" · "}
+            {" ? "}
             {last
-              ? `${displaySymbol(symbol)} · ${interval.toUpperCase()} · last ${last.close} (${chgSign}${chgText}%)`
+              ? `${displaySymbol(symbol)} ? ${interval.toUpperCase()} ? last ${last.close} (${chgSign}${chgText}%)`
               : status}
           </>
         )}
-        <span className="hint"> · $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
+        <span className="hint"> ? $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
       </footer>
     </div>
   );

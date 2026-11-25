@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CandleChart from "./components/CandleChart.jsx";
 import { fetchOHLCV, toCoinbaseProduct } from "./lib/ohlcv.js";
-import { INTERVALS, displaySymbol, normalizeSymbol } from "./lib/symbols.js";
+import { INTERVALS, displaySymbol, normalizeSymbol, assetKind } from "./lib/symbols.js";
 
 const INTERVAL_SECONDS = {
   "1m": 60,
@@ -109,6 +109,11 @@ export default function App() {
 
   useEffect(() => {
     if (!bars.length) return;
+    // Stocks (Yahoo) have no free websocket here - chart is historical + manual reload
+    if (dataSource === "yahoo" || assetKind(symbol) === "stock") {
+      setLiveState("HIST (Yahoo stocks)");
+      return;
+    }
 
     let ws;
     let reconnectTimer;
@@ -276,7 +281,7 @@ export default function App() {
           <input
             value={symbolInput}
             onChange={(e) => setSymbolInput(e.target.value)}
-            placeholder="BTC-USD or BTCUSDT"
+            placeholder="AAPL or BTC-USD"
             aria-label="Symbol"
           />
           <button type="submit">Load</button>
@@ -452,7 +457,7 @@ export default function App() {
               : status}
           </>
         )}
-        <span className="hint"> ? Double-click to fit | $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
+        <span className="hint"> ? Double-click to fit | $0 stack: React + Lightweight Charts + Coinbase / Binance.US / Yahoo stocks</span>
       </footer>
     </div>
   );

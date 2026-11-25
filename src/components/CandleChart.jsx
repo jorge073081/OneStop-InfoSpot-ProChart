@@ -14,17 +14,25 @@ const COLORS = {
 };
 
 /**
- * Free chart surface — Lightweight Charts (Apache-2.0) + your OHLCV.
- * No TradingView widget / no paid data.
+ * Free chart surface — Lightweight Charts (Apache-2.0) + live OHLCV updates.
+ * Preserves zoom/scroll on WebSocket ticks.
  */
 export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
   const priceRef = useRef(null);
   const rsiRef = useRef(null);
-  const priceChartRef = useRef(null);
-  const rsiChartRef = useRef(null);
 
+  const seriesRef = useRef({
+    candle: null,
+    volume: null,
+    sma50: null,
+    sma200: null,
+    rsi: null,
+  });
+  const isInitializedRef = useRef(false);
+
+  // Create charts once per indicator layout; destroy only on unmount or indicator toggle
   useEffect(() => {
-    if (!priceRef.current || !bars?.length) return;
+    if (!priceRef.current) return;
 
     const priceChart = createChart(priceRef.current, {
       layout: {
@@ -51,7 +59,6 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
       wickUpColor: COLORS.up,
       wickDownColor: COLORS.down,
     });
-    candleSeries.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
 
     const volumeSeries = priceChart.addHistogramSeries({
       priceFormat: { type: "volume" },
@@ -60,27 +67,17 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
     priceChart.priceScale("vol").applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 },
     });
-    volumeSeries.setData(
-      bars.map((b) => ({
-        time: b.time,
-        value: b.volume,
-        color: b.close >= b.open ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)",
-      }))
-    );
 
-    if (showSma50) {
-      const s = priceChart.addLineSeries({ color: COLORS.sma50, lineWidth: 2, title: "SMA 50" });
-      s.setData(sma(bars, 50));
-    }
-    if (showSma200) {
-      const s = priceChart.addLineSeries({ color: COLORS.sma200, lineWidth: 2, title: "SMA 200" });
-      s.setData(sma(bars, 200));
-    }
+    const sma50Series = showSma50
+      ? priceChart.addLineSeries({ color: COLORS.sma50, lineWidth: 2, title: "SMA 50" })
+      : null;
 
-    priceChart.timeScale().fitContent();
-    priceChartRef.current = priceChart;
+    const sma200Series = showSma200
+      ? priceChart.addLineSeries({ color: COLORS.sma200, lineWidth: 2, title: "SMA 200" })
+      : null;
 
     let rsiChart = null;
+    let rsiSeries = null;
     if (showRsi && rsiRef.current) {
       rsiChart = createChart(rsiRef.current, {
         layout: {
@@ -97,13 +94,9 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
         width: rsiRef.current.clientWidth,
         height: rsiRef.current.clientHeight,
       });
-      const rsiSeries = rsiChart.addLineSeries({ color: COLORS.rsi, lineWidth: 2 });
-      rsiSeries.setData(rsi(bars, 14));
-      // 30 / 70 guides via line series baselines — simple markers using area optional
+      rsiSeries = rsiChart.addLineSeries({ color: COLORS.rsi, lineWidth: 2 });
       rsiChart.priceScale("right").applyOptions({ autoScale: true });
-      rsiChartRef.current = rsiChart;
 
-      // Sync time scales
       priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
         if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
       });
@@ -111,6 +104,17 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
         if (range) priceChart.timeScale().setVisibleLogicalRange(range);
       });
     }
+
+    seriesRef.current = {
+      priceChart,
+      rsiChart,
+      candle: candleSeries,
+      volume: volumeSeries,
+      sma50: sma50Series,
+      sma200: sma200Series,
+      rsi: rsiSeries,
+    };
+    isInitializedRef.current = false;
 
     const onResize = () => {
       if (priceRef.current) {
@@ -132,9 +136,62 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
       window.removeEventListener("resize", onResize);
       priceChart.remove();
       if (rsiChart) rsiChart.remove();
-      priceChartRef.current = null;
-      rsiChartRef.current = null;
+      seriesRef.current = { candle: null, volume: null, sma50: null, sma200: null, rsi: null };
+      isInitializedRef.current = false;
     };
+  }, [showSma50, showSma200, showRsi]);
+
+  // Populate full history on symbol/interval change; smoothly update last bar on live ticks
+  useEffect(() => {
+    const s = seriesRef.current;
+    if (!s.candle || !bars?.length) return;
+
+    const firstTime = bars[0].time;
+    const isSameDataset = isInitializedRef.current && s.firstTime === firstTime;
+
+    if (!isSameDataset) {
+      s.candle.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+      s.volume.setData(
+        bars.map((b) => ({
+          time: b.time,
+          value: b.volume,
+          color: b.close >= b.open ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)",
+        }))
+      );
+      if (s.sma50) s.sma50.setData(sma(bars, 50));
+      if (s.sma200) s.sma200.setData(sma(bars, 200));
+      if (s.rsi) s.rsi.setData(rsi(bars, 14));
+
+      s.priceChart.timeScale().fitContent();
+      s.firstTime = firstTime;
+      isInitializedRef.current = true;
+    } else {
+      const last = bars[bars.length - 1];
+      s.candle.update({
+        time: last.time,
+        open: last.open,
+        high: last.high,
+        low: last.low,
+        close: last.close,
+      });
+      s.volume.update({
+        time: last.time,
+        value: last.volume,
+        color: last.close >= last.open ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)",
+      });
+      if (s.sma50) {
+        const sma50Data = sma(bars, 50);
+        if (sma50Data.length) s.sma50.update(sma50Data[sma50Data.length - 1]);
+      }
+      if (s.sma200) {
+        const sma200Data = sma(bars, 200);
+        if (sma200Data.length) s.sma200.update(sma200Data[sma200Data.length - 1]);
+      }
+      if (s.rsi) {
+        const rsiData = rsi(bars, 14);
+        if (rsiData.length) s.rsi.update(rsiData[rsiData.length - 1]);
+      }
+    }
   }, [bars, showSma50, showSma200, showRsi]);
 
   return (

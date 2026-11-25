@@ -1,17 +1,8 @@
-/**
- * Free symbol helpers — map tickers to Binance USDT pairs when possible.
- * No paid APIs. Crypto only (v0.4.2 baseline).
- */
-
 export function normalizeSymbol(raw) {
   if (!raw) return "BTCUSDT";
   let s = String(raw).trim().toUpperCase().replace(/\s+/g, "");
-  if (s.endsWith("-USD")) {
-    s = s.replace("-USD", "USDT");
-  }
-  if (s.endsWith("-USDT")) {
-    s = s.replace("-USDT", "USDT");
-  }
+  if (s.endsWith("-USD")) s = s.replace("-USD", "USDT");
+  if (s.endsWith("-USDT")) s = s.replace("-USDT", "USDT");
   if (/^[A-Z0-9]+USDT$/.test(s)) return s;
   if (/^[A-Z0-9]{2,15}$/.test(s) && !s.includes("USD")) {
     return s.endsWith("USDT") ? s : s + "USDT";
@@ -19,12 +10,10 @@ export function normalizeSymbol(raw) {
   return s;
 }
 
-export function displaySymbol(binanceSymbol) {
-  if (!binanceSymbol) return "";
-  if (binanceSymbol.endsWith("USDT")) {
-    return binanceSymbol.replace(/USDT$/, "-USD");
-  }
-  return binanceSymbol;
+export function displaySymbol(sym) {
+  if (!sym) return "";
+  if (sym.endsWith("USDT")) return sym.replace(/USDT$/, "-USD");
+  return sym;
 }
 
 export const INTERVALS = [

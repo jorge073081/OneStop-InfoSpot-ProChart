@@ -48,8 +48,10 @@ export default function App() {
   const [showMacd, setShowMacd] = useState(false);
 
   // Drawing tools (client-side — free, no TV)
+  const [showDrawBox, setShowDrawBox] = useState(false);
   const [drawTool, setDrawTool] = useState("none");
   const [drawings, setDrawings] = useState([]);
+  // draft: null | { points: [{time,price}, ...] } for multi-click tools
   const [trendDraft, setTrendDraft] = useState(null);
 
   const load = useCallback(async (sym, tf) => {
@@ -58,6 +60,7 @@ export default function App() {
     setDrawings([]);
     setTrendDraft(null);
     setDrawTool("none");
+    // keep showDrawBox as user preference
     try {
       const binanceInterval = INTERVALS.find((i) => i.id === tf)?.binance || "1d";
       const { bars: data, source } = await fetchOHLCV(sym, binanceInterval, 500);
@@ -291,15 +294,63 @@ export default function App() {
         </label>
 
         <div className="intervals">
-          <button type="button" className={`interval-btn${drawTool === "none" ? " active" : ""}`}
-            onClick={() => { setDrawTool("none"); setTrendDraft(null); }}>Navigate</button>
-          <button type="button" className={`interval-btn${drawTool === "hline" ? " active" : ""}`}
-            onClick={() => { setDrawTool("hline"); setTrendDraft(null); }}>H-Line</button>
-          <button type="button" className={`interval-btn${drawTool === "trend" ? " active" : ""}`}
-            onClick={() => setDrawTool("trend")}>Trend</button>
-          <button type="button" className="interval-btn"
-            onClick={() => { setDrawings([]); setTrendDraft(null); }}>Clear</button>
+          <button
+            type="button"
+            className={`interval-btn${showDrawBox ? " active" : ""}`}
+            onClick={() => {
+              setShowDrawBox((v) => !v);
+              if (showDrawBox) {
+                setDrawTool("none");
+                setTrendDraft(null);
+              }
+            }}
+          >
+            {showDrawBox ? "Hide tools" : "Draw tools"}
+          </button>
         </div>
+
+        {showDrawBox ? (
+          <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 520 }}>
+            {[
+              ["none", "Navigate"],
+              ["hline", "H-Line"],
+              ["hline_dot", "H-Dash"],
+              ["vline", "V-Line"],
+              ["trend", "Trend"],
+              ["ray", "Ray"],
+              ["extend", "Extend"],
+              ["rect", "Rect"],
+              ["fib", "Fib"],
+              ["fibext", "Fib Ext"],
+              ["channel", "Channel"],
+              ["measure", "Measure"],
+              ["long", "Long"],
+              ["short", "Short"],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`interval-btn${drawTool === id ? " active" : ""}`}
+                onClick={() => {
+                  setDrawTool(id);
+                  setTrendDraft(null);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="interval-btn"
+              onClick={() => {
+                setDrawings([]);
+                setTrendDraft(null);
+              }}
+            >
+              Clear all
+            </button>
+          </div>
+        ) : null}
 
         <div className="meta">
           {last ? (
@@ -318,15 +369,29 @@ export default function App() {
         </div>
       </header>
 
-      {drawTool !== "none" ? (
+      {(showDrawBox && drawTool !== "none") ? (
         <div className="status" style={{ borderTop: "none", paddingTop: 4, paddingBottom: 4 }}>
           ✏️{" "}
-          {drawTool === "hline"
-            ? "Click chart to place a horizontal line"
-            : trendDraft
-              ? "Click second point to finish trend line"
-              : "Click first point of trend line"}
-          {drawings.length ? ` · ${drawings.length} drawing(s)` : ""}
+          {{
+            hline: "Click to place solid horizontal line",
+            hline_dot: "Click to place dashed horizontal line",
+            vline: "Click to place vertical marker",
+            trend: trendDraft ? "Click 2nd point — trend line" : "Click 1st point — trend line",
+            ray: trendDraft ? "Click direction point — ray" : "Click start of ray",
+            extend: trendDraft ? "Click 2nd point — extended line both ways" : "Click 1st point — extended line",
+            rect: trendDraft ? "Click opposite corner — rectangle" : "Click first corner — rectangle",
+            fib: trendDraft ? "Click 2nd swing — Fib retracement" : "Click 1st swing — Fib",
+            fibext: trendDraft ? "Click 2nd swing — Fib extension" : "Click 1st swing — Fib Ext",
+            channel: !trendDraft
+              ? "Channel: click point 1 (base start)"
+              : trendDraft.points?.length === 1
+                ? "Channel: click point 2 (base end)"
+                : "Channel: click point 3 (parallel width)",
+            measure: trendDraft ? "Click end — measure % and $ move" : "Click start — measure tool",
+            long: "Click to mark long / buy",
+            short: "Click to mark short / sell",
+          }[drawTool] || "Draw mode"}
+          {drawings.length ? ` · ${drawings.length} object(s)` : ""}
         </div>
       ) : null}
 

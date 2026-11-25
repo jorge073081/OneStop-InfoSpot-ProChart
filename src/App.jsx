@@ -41,11 +41,23 @@ export default function App() {
   const [error, setError] = useState("");
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
+  const [showEma9, setShowEma9] = useState(false);
+  const [showEma21, setShowEma21] = useState(false);
+  const [showBb, setShowBb] = useState(false);
   const [showRsi, setShowRsi] = useState(true);
+  const [showMacd, setShowMacd] = useState(false);
+
+  // Drawing tools (client-side — free, no TV)
+  const [drawTool, setDrawTool] = useState("none");
+  const [drawings, setDrawings] = useState([]);
+  const [trendDraft, setTrendDraft] = useState(null);
 
   const load = useCallback(async (sym, tf) => {
     setStatus("Loading…");
     setError("");
+    setDrawings([]);
+    setTrendDraft(null);
+    setDrawTool("none");
     try {
       const binanceInterval = INTERVALS.find((i) => i.id === tf)?.binance || "1d";
       const { bars: data, source } = await fetchOHLCV(sym, binanceInterval, 500);
@@ -263,8 +275,31 @@ export default function App() {
           <input type="checkbox" checked={showSma200} onChange={(e) => setShowSma200(e.target.checked)} /> SMA 200
         </label>
         <label className="hint">
+          <input type="checkbox" checked={showEma9} onChange={(e) => setShowEma9(e.target.checked)} /> EMA 9
+        </label>
+        <label className="hint">
+          <input type="checkbox" checked={showEma21} onChange={(e) => setShowEma21(e.target.checked)} /> EMA 21
+        </label>
+        <label className="hint">
+          <input type="checkbox" checked={showBb} onChange={(e) => setShowBb(e.target.checked)} /> BB
+        </label>
+        <label className="hint">
           <input type="checkbox" checked={showRsi} onChange={(e) => setShowRsi(e.target.checked)} /> RSI
         </label>
+        <label className="hint">
+          <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} /> MACD
+        </label>
+
+        <div className="intervals">
+          <button type="button" className={`interval-btn${drawTool === "none" ? " active" : ""}`}
+            onClick={() => { setDrawTool("none"); setTrendDraft(null); }}>Navigate</button>
+          <button type="button" className={`interval-btn${drawTool === "hline" ? " active" : ""}`}
+            onClick={() => { setDrawTool("hline"); setTrendDraft(null); }}>H-Line</button>
+          <button type="button" className={`interval-btn${drawTool === "trend" ? " active" : ""}`}
+            onClick={() => setDrawTool("trend")}>Trend</button>
+          <button type="button" className="interval-btn"
+            onClick={() => { setDrawings([]); setTrendDraft(null); }}>Clear</button>
+        </div>
 
         <div className="meta">
           {last ? (
@@ -283,9 +318,35 @@ export default function App() {
         </div>
       </header>
 
+      {drawTool !== "none" ? (
+        <div className="status" style={{ borderTop: "none", paddingTop: 4, paddingBottom: 4 }}>
+          ✏️{" "}
+          {drawTool === "hline"
+            ? "Click chart to place a horizontal line"
+            : trendDraft
+              ? "Click second point to finish trend line"
+              : "Click first point of trend line"}
+          {drawings.length ? ` · ${drawings.length} drawing(s)` : ""}
+        </div>
+      ) : null}
+
       <main className="chart-wrap">
         {bars.length > 0 ? (
-          <CandleChart bars={bars} showSma50={showSma50} showSma200={showSma200} showRsi={showRsi} />
+          <CandleChart
+            bars={bars}
+            showSma50={showSma50}
+            showSma200={showSma200}
+            showEma9={showEma9}
+            showEma21={showEma21}
+            showBb={showBb}
+            showRsi={showRsi}
+            showMacd={showMacd}
+            drawTool={drawTool}
+            drawings={drawings}
+            onAddDrawing={(d) => setDrawings((prev) => [...prev, d])}
+            trendDraft={trendDraft}
+            onTrendDraft={setTrendDraft}
+          />
         ) : (
           <div className="chart-panel" style={{ display: "grid", placeItems: "center", color: "#8b9bb4" }}>
             {error || "No data"}

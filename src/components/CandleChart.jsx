@@ -60,17 +60,34 @@ export default function CandleChart({
     priceLines: [],
     trendSeries: [],
     datasetKey: null,
+    _vlineMarkers: [],
+    _posMarkers: [],
   });
 
   const toolRef = useRef(drawTool);
   const draftRef = useRef(trendDraft);
   const drawingsRef = useRef(drawings);
-  useEffect(() => { toolRef.current = drawTool; }, [drawTool]);
-  useEffect(() => { draftRef.current = trendDraft; }, [trendDraft]);
-  useEffect(() => { drawingsRef.current = drawings; }, [drawings]);
+  const onAddRef = useRef(onAddDrawing);
+  const onDraftRef = useRef(onTrendDraft);
+
+  useEffect(() => {
+    toolRef.current = drawTool;
+  }, [drawTool]);
+  useEffect(() => {
+    draftRef.current = trendDraft;
+  }, [trendDraft]);
+  useEffect(() => {
+    drawingsRef.current = drawings;
+  }, [drawings]);
+  useEffect(() => {
+    onAddRef.current = onAddDrawing;
+  }, [onAddDrawing]);
+  useEffect(() => {
+    onDraftRef.current = onTrendDraft;
+  }, [onTrendDraft]);
 
   function applyDrawing(d, s) {
-    if (!s.candle || !s.priceChart) return;
+    if (!s.candle || !s.priceChart || !d) return;
 
     if (d.type === "hline" || d.type === "hline_dot") {
       if (s.priceLines.some((x) => x.id === d.id)) return;
@@ -88,21 +105,35 @@ export default function CandleChart({
 
     if (d.type === "vline") {
       if (s.trendSeries.some((x) => x.id === d.id)) return;
-      const markers = (s._vlineMarkers = s._vlineMarkers || []);
-      markers.push({ time: d.time, position: "aboveBar", color: COLORS.draw, shape: "arrowDown", text: "" });
-      markers.push({ time: d.time, position: "belowBar", color: COLORS.draw, shape: "arrowUp", text: "" });
+      s._vlineMarkers = s._vlineMarkers || [];
+      s._vlineMarkers.push({
+        time: d.time,
+        position: "aboveBar",
+        color: COLORS.draw,
+        shape: "arrowDown",
+        text: "",
+      });
+      s._vlineMarkers.push({
+        time: d.time,
+        position: "belowBar",
+        color: COLORS.draw,
+        shape: "arrowUp",
+        text: "",
+      });
       try {
-        const pos = s._posMarkers || [];
-        s.candle.setMarkers([...markers, ...pos].sort((a, b) => (a.time > b.time ? 1 : -1)));
-      } catch {}
+        const all = [...s._vlineMarkers, ...(s._posMarkers || [])].sort((a, b) =>
+          a.time > b.time ? 1 : -1
+        );
+        s.candle.setMarkers(all);
+      } catch (_) {}
       s.trendSeries.push({ id: d.id, series: null, kind: "vline" });
       return;
     }
 
     if (d.type === "long" || d.type === "short") {
       if (s.trendSeries.some((x) => x.id === d.id)) return;
-      const markers = (s._posMarkers = s._posMarkers || []);
-      markers.push({
+      s._posMarkers = s._posMarkers || [];
+      s._posMarkers.push({
         time: d.time,
         position: d.type === "long" ? "belowBar" : "aboveBar",
         color: d.type === "long" ? "#22c55e" : "#ef4444",
@@ -110,9 +141,11 @@ export default function CandleChart({
         text: d.type === "long" ? "L" : "S",
       });
       try {
-        const all = [...(s._vlineMarkers || []), ...markers].sort((a, b) => (a.time > b.time ? 1 : -1));
+        const all = [...(s._vlineMarkers || []), ...s._posMarkers].sort((a, b) =>
+          a.time > b.time ? 1 : -1
+        );
         s.candle.setMarkers(all);
-      } catch {}
+      } catch (_) {}
       s.trendSeries.push({ id: d.id, series: null, kind: d.type });
       return;
     }
@@ -125,10 +158,17 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      let t1 = d.t1, p1 = d.p1, t2 = d.t2, p2 = d.p2;
+      let t1 = d.t1;
+      let p1 = d.p1;
+      let t2 = d.t2;
+      let p2 = d.p2;
       if (t1 > t2) {
-        const tt = t1; t1 = t2; t2 = tt;
-        const pp = p1; p1 = p2; p2 = pp;
+        const tt = t1;
+        t1 = t2;
+        t2 = tt;
+        const pp = p1;
+        p1 = p2;
+        p2 = pp;
       }
       const spanT = t2 - t1 || 1;
       const slope = (p2 - p1) / spanT;
@@ -150,9 +190,14 @@ export default function CandleChart({
           { time: t3, value: p1 + slope * (t3 - t1) },
         ].sort((a, b) => a.time - b.time);
       } else {
-        pts = [{ time: t1, value: p1 }, { time: t2, value: p2 }];
+        pts = [
+          { time: t1, value: p1 },
+          { time: t2, value: p2 },
+        ];
       }
-      try { series.setData(pts); } catch {}
+      try {
+        series.setData(pts);
+      } catch (_) {}
       s.trendSeries.push({ id: d.id, series });
       return;
     }
@@ -163,12 +208,42 @@ export default function CandleChart({
       const lo = Math.min(d.p1, d.p2);
       const tA = Math.min(d.t1, d.t2);
       const tB = Math.max(d.t1, d.t2);
-      const top = s.priceChart.addLineSeries({ color: "rgba(34,211,238,0.9)", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      const bot = s.priceChart.addLineSeries({ color: "rgba(34,211,238,0.9)", lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
-      top.setData([{ time: tA, value: hi }, { time: tB, value: hi }]);
-      bot.setData([{ time: tA, value: lo }, { time: tB, value: lo }]);
-      const pl1 = s.candle.createPriceLine({ price: hi, color: "rgba(34,211,238,0.45)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "R high" });
-      const pl2 = s.candle.createPriceLine({ price: lo, color: "rgba(34,211,238,0.45)", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "R low" });
+      const top = s.priceChart.addLineSeries({
+        color: "rgba(34,211,238,0.9)",
+        lineWidth: 1,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      const bot = s.priceChart.addLineSeries({
+        color: "rgba(34,211,238,0.9)",
+        lineWidth: 1,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      top.setData([
+        { time: tA, value: hi },
+        { time: tB, value: hi },
+      ]);
+      bot.setData([
+        { time: tA, value: lo },
+        { time: tB, value: lo },
+      ]);
+      const pl1 = s.candle.createPriceLine({
+        price: hi,
+        color: "rgba(34,211,238,0.45)",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "R high",
+      });
+      const pl2 = s.candle.createPriceLine({
+        price: lo,
+        color: "rgba(34,211,238,0.45)",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "R low",
+      });
       s.priceLines.push({ id: d.id + "-h", line: pl1 });
       s.priceLines.push({ id: d.id + "-l", line: pl2 });
       s.trendSeries.push({ id: d.id, series: top, extra: bot });
@@ -181,9 +256,10 @@ export default function CandleChart({
       const lo = Math.min(d.p1, d.p2);
       const span = hi - lo;
       if (!(span > 0)) return;
-      const levels = d.type === "fib"
-        ? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
-        : [0, 0.618, 1, 1.272, 1.618, 2.0, 2.618];
+      const levels =
+        d.type === "fib"
+          ? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
+          : [0, 0.618, 1, 1.272, 1.618, 2.0, 2.618];
       const colors = ["#94a3b8", "#38bdf8", "#22d3ee", "#eab308", "#f97316", "#ef4444", "#a78bfa"];
       levels.forEach((r, i) => {
         const price = d.type === "fib" ? hi - span * r : lo + span * r;
@@ -193,7 +269,7 @@ export default function CandleChart({
           lineWidth: r === 0.5 || r === 0.618 || r === 1.618 ? 2 : 1,
           lineStyle: 2,
           axisLabelVisible: true,
-          title: d.type === "fib" ? `F ${r}` : `FE ${r}`,
+          title: d.type === "fib" ? "F " + r : "FE " + r,
         });
         s.priceLines.push({ id: d.id + "-" + r, line });
       });
@@ -202,17 +278,33 @@ export default function CandleChart({
 
     if (d.type === "channel") {
       if (s.trendSeries.some((x) => x.id === d.id)) return;
-      const { t1, p1, t2, p2, t3, p3 } = d;
-      const spanT = (t2 - t1) || 1;
+      const t1 = d.t1;
+      const p1 = d.p1;
+      const t2 = d.t2;
+      const p2 = d.p2;
+      const t3 = d.t3;
+      const p3 = d.p3;
+      const spanT = t2 - t1 || 1;
       const slope = (p2 - p1) / spanT;
       const expected = p1 + slope * (t3 - t1);
       const offset = p3 - expected;
-      const base = s.priceChart.addLineSeries({ color: COLORS.draw, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-      const par = s.priceChart.addLineSeries({ color: "#a78bfa", lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+      const base = s.priceChart.addLineSeries({
+        color: COLORS.draw,
+        lineWidth: 2,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      const par = s.priceChart.addLineSeries({
+        color: "#a78bfa",
+        lineWidth: 2,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
       const tA = Math.min(t1, t2, t3);
       const tB = Math.max(t1, t2, t3);
       const tPad = Math.max(1, Math.floor((tB - tA) * 0.15) || 1);
-      const ts = [tA - tPad, t1, t2, t3, tB + tPad].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+      const raw = [tA - tPad, t1, t2, t3, tB + tPad];
+      const ts = raw.filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
       base.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) })));
       par.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) + offset })));
       s.trendSeries.push({ id: d.id, series: base, extra: par });
@@ -235,82 +327,207 @@ export default function CandleChart({
         { time: tB, value: d.t1 <= d.t2 ? d.p2 : d.p1 },
       ]);
       const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
-      const markers = (s._posMarkers = s._posMarkers || []);
-      markers.push({
+      s._posMarkers = s._posMarkers || [];
+      s._posMarkers.push({
         time: tB,
         position: "aboveBar",
         color: "#eab308",
         shape: "circle",
-        text: `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`,
+        text: (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%",
       });
       try {
-        const all = [...(s._vlineMarkers || []), ...markers].sort((a, b) => (a.time > b.time ? 1 : -1));
+        const all = [...(s._vlineMarkers || []), ...s._posMarkers].sort((a, b) =>
+          a.time > b.time ? 1 : -1
+        );
         s.candle.setMarkers(all);
-      } catch {}
+      } catch (_) {}
       s.trendSeries.push({ id: d.id, series });
-      return;
     }
   }
 
-      const clickHandler = (param) => {
+  // Create charts once when indicator layout changes
+  useEffect(() => {
+    if (!priceRef.current) return;
+
+    const priceChart = createChart(priceRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: COLORS.bg },
+        textColor: COLORS.text,
+        fontFamily: "IBM Plex Sans, system-ui, sans-serif",
+      },
+      grid: {
+        vertLines: { color: COLORS.grid },
+        horzLines: { color: COLORS.grid },
+      },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderVisible: false },
+      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
+      width: priceRef.current.clientWidth,
+      height: priceRef.current.clientHeight,
+    });
+
+    const candleSeries = priceChart.addCandlestickSeries({
+      upColor: COLORS.up,
+      downColor: COLORS.down,
+      borderUpColor: COLORS.up,
+      borderDownColor: COLORS.down,
+      wickUpColor: COLORS.up,
+      wickDownColor: COLORS.down,
+    });
+
+    const volumeSeries = priceChart.addHistogramSeries({
+      priceFormat: { type: "volume" },
+      priceScaleId: "vol",
+    });
+    priceChart.priceScale("vol").applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    const sma50Series = showSma50
+      ? priceChart.addLineSeries({ color: COLORS.sma50, lineWidth: 2, title: "SMA 50" })
+      : null;
+    const sma200Series = showSma200
+      ? priceChart.addLineSeries({ color: COLORS.sma200, lineWidth: 2, title: "SMA 200" })
+      : null;
+    const ema9Series = showEma9
+      ? priceChart.addLineSeries({ color: COLORS.ema9, lineWidth: 2, title: "EMA 9" })
+      : null;
+    const ema21Series = showEma21
+      ? priceChart.addLineSeries({ color: COLORS.ema21, lineWidth: 2, title: "EMA 21" })
+      : null;
+    const bbMid = showBb
+      ? priceChart.addLineSeries({ color: COLORS.bb, lineWidth: 1, title: "BB mid" })
+      : null;
+    const bbUpper = showBb
+      ? priceChart.addLineSeries({ color: COLORS.bb, lineWidth: 1, lineStyle: 2, title: "BB up" })
+      : null;
+    const bbLower = showBb
+      ? priceChart.addLineSeries({ color: COLORS.bb, lineWidth: 1, lineStyle: 2, title: "BB low" })
+      : null;
+
+    let rsiChart = null;
+    let rsiSeries = null;
+    if (showRsi && rsiRef.current) {
+      rsiChart = createChart(rsiRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: COLORS.bg },
+          textColor: COLORS.text,
+          fontFamily: "IBM Plex Sans, system-ui, sans-serif",
+        },
+        grid: {
+          vertLines: { color: COLORS.grid },
+          horzLines: { color: COLORS.grid },
+        },
+        rightPriceScale: { borderVisible: false },
+        timeScale: { borderVisible: false, visible: false },
+        width: rsiRef.current.clientWidth,
+        height: rsiRef.current.clientHeight,
+      });
+      rsiSeries = rsiChart.addLineSeries({ color: COLORS.rsi, lineWidth: 2 });
+      rsiChart.priceScale("right").applyOptions({ autoScale: true });
+    }
+
+    let macdChart = null;
+    let macdLineSeries = null;
+    let macdSignalSeries = null;
+    let macdHistSeries = null;
+    if (showMacd && macdRef.current) {
+      macdChart = createChart(macdRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: COLORS.bg },
+          textColor: COLORS.text,
+          fontFamily: "IBM Plex Sans, system-ui, sans-serif",
+        },
+        grid: {
+          vertLines: { color: COLORS.grid },
+          horzLines: { color: COLORS.grid },
+        },
+        rightPriceScale: { borderVisible: false },
+        timeScale: { borderVisible: false, visible: false },
+        width: macdRef.current.clientWidth,
+        height: macdRef.current.clientHeight,
+      });
+      macdHistSeries = macdChart.addHistogramSeries({
+        priceFormat: { type: "price", precision: 4 },
+      });
+      macdLineSeries = macdChart.addLineSeries({ color: COLORS.macd, lineWidth: 2 });
+      macdSignalSeries = macdChart.addLineSeries({ color: COLORS.signal, lineWidth: 2 });
+    }
+
+    const link = (a, b) => {
+      if (!a || !b) return;
+      a.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (range) b.timeScale().setVisibleLogicalRange(range);
+      });
+    };
+    link(priceChart, rsiChart);
+    link(rsiChart, priceChart);
+    link(priceChart, macdChart);
+    link(macdChart, priceChart);
+    link(rsiChart, macdChart);
+    link(macdChart, rsiChart);
+
+    const clickHandler = (param) => {
       const tool = toolRef.current;
       if (tool === "none" || !param || param.point === undefined || !param.time) return;
+
       let p = null;
       try {
         p = candleSeries.coordinateToPrice(param.point.y);
-      } catch {}
+      } catch (_) {}
       if (p == null || !Number.isFinite(p)) {
         const sd = param.seriesData.get(candleSeries);
         if (sd && typeof sd.close === "number") p = sd.close;
       }
       if (p == null || !Number.isFinite(p)) return;
+
       const t = param.time;
       const pt = { time: t, price: p };
 
       if (tool === "hline" || tool === "hline_dot") {
-        onAddDrawing?.({ id: `${tool}-${Date.now()}`, type: tool, price: p });
+        onAddRef.current?.({ id: tool + "-" + Date.now(), type: tool, price: p });
         return;
       }
       if (tool === "vline") {
-        onAddDrawing?.({ id: `vl-${Date.now()}`, type: "vline", time: t, price: p });
+        onAddRef.current?.({ id: "vl-" + Date.now(), type: "vline", time: t, price: p });
         return;
       }
       if (tool === "long" || tool === "short") {
-        onAddDrawing?.({ id: `${tool}-${Date.now()}`, type: tool, time: t, price: p });
+        onAddRef.current?.({ id: tool + "-" + Date.now(), type: tool, time: t, price: p });
         return;
       }
 
-      // multi-click tools: trend, ray, extend, rect, fib, fibext, measure (2 pts), channel (3 pts)
       const twoClick = ["trend", "ray", "extend", "rect", "fib", "fibext", "measure"];
       const draft = draftRef.current;
 
       if (twoClick.includes(tool)) {
         if (!draft || !draft.points || draft.points.length === 0) {
-          onTrendDraft?.({ points: [pt] });
+          onDraftRef.current?.({ points: [pt] });
         } else {
           const a = draft.points[0];
-          onAddDrawing?.({
-            id: `${tool}-${Date.now()}`,
+          onAddRef.current?.({
+            id: tool + "-" + Date.now(),
             type: tool,
             t1: a.time,
             p1: a.price,
             t2: t,
             p2: p,
           });
-          onTrendDraft?.(null);
+          onDraftRef.current?.(null);
         }
         return;
       }
 
       if (tool === "channel") {
         if (!draft || !draft.points || draft.points.length === 0) {
-          onTrendDraft?.({ points: [pt] });
+          onDraftRef.current?.({ points: [pt] });
         } else if (draft.points.length === 1) {
-          onTrendDraft?.({ points: [...draft.points, pt] });
+          onDraftRef.current?.({ points: [...draft.points, pt] });
         } else {
-          const [a, b] = draft.points;
-          onAddDrawing?.({
-            id: `channel-${Date.now()}`,
+          const a = draft.points[0];
+          const b = draft.points[1];
+          onAddRef.current?.({
+            id: "channel-" + Date.now(),
             type: "channel",
             t1: a.time,
             p1: a.price,
@@ -319,12 +536,12 @@ export default function CandleChart({
             t3: t,
             p3: p,
           });
-          onTrendDraft?.(null);
+          onDraftRef.current?.(null);
         }
       }
     };
 
-        priceChart.subscribeClick(clickHandler);
+    priceChart.subscribeClick(clickHandler);
 
     const s = {
       priceChart,
@@ -346,82 +563,160 @@ export default function CandleChart({
       priceLines: [],
       trendSeries: [],
       datasetKey: null,
+      _vlineMarkers: [],
+      _posMarkers: [],
     };
     seriesRef.current = s;
-    drawingsRef.current.forEach((d) => applyDrawing(d, s));
+
+    // re-apply drawings after chart recreate
+    (drawingsRef.current || []).forEach((d) => applyDrawing(d, s));
 
     const onResize = () => {
       if (priceRef.current) {
-        priceChart.applyOptions({ width: priceRef.current.clientWidth, height: priceRef.current.clientHeight });
+        priceChart.applyOptions({
+          width: priceRef.current.clientWidth,
+          height: priceRef.current.clientHeight,
+        });
       }
       if (rsiChart && rsiRef.current) {
-        rsiChart.applyOptions({ width: rsiRef.current.clientWidth, height: rsiRef.current.clientHeight });
+        rsiChart.applyOptions({
+          width: rsiRef.current.clientWidth,
+          height: rsiRef.current.clientHeight,
+        });
       }
       if (macdChart && macdRef.current) {
-        macdChart.applyOptions({ width: macdRef.current.clientWidth, height: macdRef.current.clientHeight });
+        macdChart.applyOptions({
+          width: macdRef.current.clientWidth,
+          height: macdRef.current.clientHeight,
+        });
       }
     };
     window.addEventListener("resize", onResize);
 
     return () => {
       window.removeEventListener("resize", onResize);
-      try { priceChart.unsubscribeClick(clickHandler); } catch {}
+      try {
+        priceChart.unsubscribeClick(clickHandler);
+      } catch (_) {}
       priceChart.remove();
       if (rsiChart) rsiChart.remove();
       if (macdChart) macdChart.remove();
       seriesRef.current = {
-        priceChart: null, rsiChart: null, macdChart: null,
-        candle: null, volume: null, sma50: null, sma200: null,
-        ema9: null, ema21: null, bbMid: null, bbUpper: null, bbLower: null,
-        rsi: null, macdLine: null, macdSignal: null, macdHist: null,
-        priceLines: [], trendSeries: [], datasetKey: null,
+        priceChart: null,
+        rsiChart: null,
+        macdChart: null,
+        candle: null,
+        volume: null,
+        sma50: null,
+        sma200: null,
+        ema9: null,
+        ema21: null,
+        bbMid: null,
+        bbUpper: null,
+        bbLower: null,
+        rsi: null,
+        macdLine: null,
+        macdSignal: null,
+        macdHist: null,
+        priceLines: [],
+        trendSeries: [],
+        datasetKey: null,
+        _vlineMarkers: [],
+        _posMarkers: [],
       };
     };
   }, [showSma50, showSma200, showEma9, showEma21, showBb, showRsi, showMacd]);
 
+  // Sync drawings list
   useEffect(() => {
     const s = seriesRef.current;
     if (!s.candle) return;
-    // Keep price lines whose id starts with a live drawing id (fib uses id-0.5 etc.)
+
     const live = drawings.map((d) => d.id);
-    const keepPrice = (id) => live.some((lid) => id === lid || id.startsWith(lid + "-"));
+    const keepPrice = (id) => live.some((lid) => id === lid || String(id).startsWith(lid + "-"));
+
     s.priceLines = s.priceLines.filter(({ id, line }) => {
       if (keepPrice(id)) return true;
-      try { s.candle.removePriceLine(line); } catch {}
+      try {
+        s.candle.removePriceLine(line);
+      } catch (_) {}
       return false;
     });
+
     s.trendSeries = s.trendSeries.filter((entry) => {
-      const { id, series, extra, kind } = entry;
-      if (live.includes(id)) return true;
-      try { if (series) s.priceChart.removeSeries(series); } catch {}
-      try { if (extra) s.priceChart.removeSeries(extra); } catch {}
+      if (live.includes(entry.id)) return true;
+      try {
+        if (entry.series) s.priceChart.removeSeries(entry.series);
+      } catch (_) {}
+      try {
+        if (entry.extra) s.priceChart.removeSeries(entry.extra);
+      } catch (_) {}
       return false;
     });
-    // Rebuild vline markers from remaining vline drawings
-    const markers = [];
+
+    // rebuild markers from drawings
+    s._vlineMarkers = [];
+    s._posMarkers = [];
     drawings.forEach((d) => {
       if (d.type === "vline") {
-        markers.push({ time: d.time, position: "aboveBar", color: COLORS.draw, shape: "arrowDown", text: "" });
-        markers.push({ time: d.time, position: "belowBar", color: COLORS.draw, shape: "arrowUp", text: "" });
+        s._vlineMarkers.push({
+          time: d.time,
+          position: "aboveBar",
+          color: COLORS.draw,
+          shape: "arrowDown",
+          text: "",
+        });
+        s._vlineMarkers.push({
+          time: d.time,
+          position: "belowBar",
+          color: COLORS.draw,
+          shape: "arrowUp",
+          text: "",
+        });
+      }
+      if (d.type === "long" || d.type === "short") {
+        s._posMarkers.push({
+          time: d.time,
+          position: d.type === "long" ? "belowBar" : "aboveBar",
+          color: d.type === "long" ? "#22c55e" : "#ef4444",
+          shape: d.type === "long" ? "arrowUp" : "arrowDown",
+          text: d.type === "long" ? "L" : "S",
+        });
+      }
+      if (d.type === "measure") {
+        const tB = Math.max(d.t1, d.t2);
+        const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
+        s._posMarkers.push({
+          time: tB,
+          position: "aboveBar",
+          color: "#eab308",
+          shape: "circle",
+          text: (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%",
+        });
       }
     });
-    s._vlineMarkers = markers;
     try {
-      s.candle.setMarkers(markers.sort((a, b) => (a.time > b.time ? 1 : -1)));
-    } catch {}
+      const all = [...s._vlineMarkers, ...s._posMarkers].sort((a, b) => (a.time > b.time ? 1 : -1));
+      s.candle.setMarkers(all);
+    } catch (_) {}
+
     drawings.forEach((d) => applyDrawing(d, s));
   }, [drawings]);
 
+  // Bars / live updates
   useEffect(() => {
     const s = seriesRef.current;
     if (!s.candle || !bars || bars.length === 0) return;
 
     const first = bars[0];
     const second = bars[1];
-    const currentKey = String(first.time) + "_" + String(second ? second.time : 0) + "_" + String(first.open);
+    const currentKey =
+      String(first.time) + "_" + String(second ? second.time : 0) + "_" + String(first.open);
 
     if (s.datasetKey !== currentKey) {
-      s.candle.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+      s.candle.setData(
+        bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close }))
+      );
       s.volume.setData(
         bars.map((b) => ({
           time: b.time,
@@ -456,24 +751,49 @@ export default function CandleChart({
       s.datasetKey = currentKey;
     } else {
       const last = bars[bars.length - 1];
-      s.candle.update({ time: last.time, open: last.open, high: last.high, low: last.low, close: last.close });
+      s.candle.update({
+        time: last.time,
+        open: last.open,
+        high: last.high,
+        low: last.low,
+        close: last.close,
+      });
       s.volume.update({
         time: last.time,
         value: last.volume,
         color: last.close >= last.open ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)",
       });
-      if (s.sma50) { const d = sma(bars, 50); if (d.length) s.sma50.update(d[d.length - 1]); }
-      if (s.sma200) { const d = sma(bars, 200); if (d.length) s.sma200.update(d[d.length - 1]); }
-      if (s.ema9) { const d = ema(bars, 9); if (d.length) s.ema9.update(d[d.length - 1]); }
-      if (s.ema21) { const d = ema(bars, 21); if (d.length) s.ema21.update(d[d.length - 1]); }
-      if (s.rsi) { const d = rsi(bars, 14); if (d.length) s.rsi.update(d[d.length - 1]); }
+      if (s.sma50) {
+        const d = sma(bars, 50);
+        if (d.length) s.sma50.update(d[d.length - 1]);
+      }
+      if (s.sma200) {
+        const d = sma(bars, 200);
+        if (d.length) s.sma200.update(d[d.length - 1]);
+      }
+      if (s.ema9) {
+        const d = ema(bars, 9);
+        if (d.length) s.ema9.update(d[d.length - 1]);
+      }
+      if (s.ema21) {
+        const d = ema(bars, 21);
+        if (d.length) s.ema21.update(d[d.length - 1]);
+      }
+      if (s.rsi) {
+        const d = rsi(bars, 14);
+        if (d.length) s.rsi.update(d[d.length - 1]);
+      }
       if (s.macdLine) {
         const m = macd(bars);
         if (m.macdLine.length) s.macdLine.update(m.macdLine[m.macdLine.length - 1]);
         if (m.signalLine.length) s.macdSignal.update(m.signalLine[m.signalLine.length - 1]);
         if (m.hist.length) {
           const h = m.hist[m.hist.length - 1];
-          s.macdHist.update({ time: h.time, value: h.value, color: h.value >= 0 ? COLORS.histUp : COLORS.histDown });
+          s.macdHist.update({
+            time: h.time,
+            value: h.value,
+            color: h.value >= 0 ? COLORS.histUp : COLORS.histDown,
+          });
         }
       }
     }

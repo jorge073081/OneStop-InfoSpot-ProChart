@@ -302,29 +302,48 @@ async function fetchYahooOHLCV(symbol, interval) {
 
 export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
   if (assetKind(symbol) === "stock") {
-    const errors = [];
-    // Prefer Stooq for stocks (more TF options, fewer 403s than Yahoo in browser)
+    // Same-origin Vercel serverless proxy (avoids browser CORS/403)
     try {
-      const bars = await fetchStooqOHLCV(symbol, interval);
-      return { bars, source: "stooq" };
+      const q =
+        "/api/stock?symbol=" +
+        encodeURIComponent(symbol) +
+        "&interval=" +
+        encodeURIComponent(interval);
+      const res = await fetch(q);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) ||
+            "API " + res.status + (data.details ? ": " + data.details.join(" | ") : "")
+        );
+      }
+      if (!data.bars || !data.bars.length) throw new Error("Empty stock bars from API");
+      return { bars: data.bars, source: data.source || "api" };
     } catch (e) {
-      errors.push("Stooq: " + (e && e.message ? e.message : String(e)));
+      // Local dev without `vercel dev`: fall back to browser proxies (may 403)
+      const errors = [e && e.message ? e.message : String(e)];
+      try {
+        const bars = await fetchStooqOHLCV(symbol, interval);
+        return { bars, source: "stooq" };
+      } catch (e2) {
+        errors.push("Stooq: " + (e2 && e2.message ? e2.message : String(e2)));
+      }
+      try {
+        const bars = await fetchYahooOHLCV(symbol, interval);
+        return { bars, source: "yahoo" };
+      } catch (e3) {
+        errors.push("Yahoo: " + (e3 && e3.message ? e3.message : String(e3)));
+      }
+      throw new Error(
+        "Stock fetch failed for " +
+          symbol +
+          " @ " +
+          interval +
+          ". " +
+          errors.join(" | ") +
+          " Deploy api/stock.js on Vercel for reliable stocks."
+      );
     }
-    try {
-      const bars = await fetchYahooOHLCV(symbol, interval);
-      return { bars, source: "yahoo" };
-    } catch (e) {
-      errors.push("Yahoo: " + (e && e.message ? e.message : String(e)));
-    }
-    throw new Error(
-      "Stock fetch failed for " +
-        symbol +
-        " @ " +
-        interval +
-        ". " +
-        errors.join(" | ") +
-        (interval === "1m" ? " Tip: use 5m or 1D for stocks." : "")
-    );
   }
 
   try {

@@ -13,24 +13,23 @@ const COLORS = {
   rsi: "#a78bfa",
 };
 
-/**
- * Free chart surface — Lightweight Charts (Apache-2.0) + live OHLCV updates.
- * Preserves zoom/scroll on WebSocket ticks.
- */
 export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
   const priceRef = useRef(null);
   const rsiRef = useRef(null);
 
   const seriesRef = useRef({
+    priceChart: null,
+    rsiChart: null,
     candle: null,
     volume: null,
     sma50: null,
     sma200: null,
     rsi: null,
+    lastLength: 0,
+    firstTime: null,
   });
   const isInitializedRef = useRef(false);
 
-  // Create charts once per indicator layout; destroy only on unmount or indicator toggle
   useEffect(() => {
     if (!priceRef.current) return;
 
@@ -113,6 +112,8 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
       sma50: sma50Series,
       sma200: sma200Series,
       rsi: rsiSeries,
+      lastLength: 0,
+      firstTime: null,
     };
     isInitializedRef.current = false;
 
@@ -136,20 +137,32 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
       window.removeEventListener("resize", onResize);
       priceChart.remove();
       if (rsiChart) rsiChart.remove();
-      seriesRef.current = { candle: null, volume: null, sma50: null, sma200: null, rsi: null };
+      seriesRef.current = {
+        priceChart: null,
+        rsiChart: null,
+        candle: null,
+        volume: null,
+        sma50: null,
+        sma200: null,
+        rsi: null,
+        lastLength: 0,
+        firstTime: null,
+      };
       isInitializedRef.current = false;
     };
   }, [showSma50, showSma200, showRsi]);
 
-  // Populate full history on symbol/interval change; smoothly update last bar on live ticks
   useEffect(() => {
     const s = seriesRef.current;
     if (!s.candle || !bars?.length) return;
 
     const firstTime = bars[0].time;
-    const isSameDataset = isInitializedRef.current && s.firstTime === firstTime;
+    const isSameSymbolOrTf =
+      isInitializedRef.current &&
+      s.lastLength === bars.length &&
+      Math.abs((s.firstTime || 0) - firstTime) <= 86400 * 7;
 
-    if (!isSameDataset) {
+    if (!isSameSymbolOrTf) {
       s.candle.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
       s.volume.setData(
         bars.map((b) => ({
@@ -164,6 +177,7 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
 
       s.priceChart.timeScale().fitContent();
       s.firstTime = firstTime;
+      s.lastLength = bars.length;
       isInitializedRef.current = true;
     } else {
       const last = bars[bars.length - 1];

@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CandleChart from "./components/CandleChart.jsx";
-import { fetchOHLCV } from "./lib/ohlcv.js";
+import { fetchOHLCV, toCoinbaseProduct } from "./lib/ohlcv.js";
 import { INTERVALS, displaySymbol, normalizeSymbol } from "./lib/symbols.js";
+
+const INTERVAL_SECONDS = {
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "1h": 3600,
+  "4h": 14400,
+  "1d": 86400,
+  "1w": 604800,
+};
 
 function readParams() {
   const q = new URLSearchParams(window.location.search);
@@ -19,18 +29,13 @@ function writeParams(symbol, interval) {
   window.history.replaceState({}, "", url);
 }
 
-/**
- * Chart Desk v0.2 — live WebSocket stack ($0):
- * - React + Vite (open source)
- * - Lightweight Charts (Apache-2.0)
- * - Binance.US public klines REST + live WebSocket stream (no API key)
- */
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
   const [symbol, setSymbol] = useState(initial.symbol);
   const [interval, setInterval] = useState(initial.interval);
   const [bars, setBars] = useState([]);
+  const [dataSource, setDataSource] = useState("coinbase");
   const [status, setStatus] = useState("Loading…");
   const [liveState, setLiveState] = useState("Connecting…");
   const [error, setError] = useState("");
@@ -43,15 +48,15 @@ export default function App() {
     setError("");
     try {
       const binanceInterval = INTERVALS.find((i) => i.id === tf)?.binance || "1d";
-      const data = await fetchOHLCV(sym, binanceInterval, 500);
+      const { bars: data, source } = await fetchOHLCV(sym, binanceInterval, 500);
       setBars(data);
+      setDataSource(source);
       writeParams(sym, tf);
       const last = data[data.length - 1];
       const prev = data[data.length - 2];
       const chg = prev ? ((last.close / prev.close - 1) * 100).toFixed(2) : "0.00";
-      setStatus(
-        `${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${Number(chg) >= 0 ? "+" : ""}${chg}%)`
-      );
+      const sign = Number(chg) >= 0 ? "+" : "";
+      setStatus(`${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${sign}${chg}%)`);
     } catch (e) {
       setBars([]);
       setError(e.message || String(e));
@@ -63,23 +68,95 @@ export default function App() {
     load(symbol, interval);
   }, [symbol, interval, load]);
 
-  // Live Binance.US WebSocket stream for the active symbol & interval
   useEffect(() => {
-    const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
-    const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
-    const wsUrl = `wss://stream.binance.us:9443/ws/${streamName}`;
+    if (!bars.length) return;
 
     let ws;
     let reconnectTimer;
     let isCancelled = false;
 
-    const connect = () => {
+    const connectCoinbase = () => {
       if (isCancelled) return;
       setLiveState("Connecting…");
-      ws = new WebSocket(wsUrl);
+      const product = toCoinbaseProduct(symbol);
+      const bucketSec = INTERVAL_SECONDS[interval] || 86400;
+
+      ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
 
       ws.onopen = () => {
-        if (!isCancelled) setLiveState("● LIVE");
+        if (isCancelled) return;
+        ws.send(
+          JSON.stringify({
+            type: "subscribe",
+            product_ids: [product],
+            channels: ["ticker"],
+          })
+        );
+        setLiveState("● LIVE (Coinbase)");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type !== "ticker" || !msg.price) return;
+
+          const price = parseFloat(msg.price);
+          const tradeSize = parseFloat(msg.last_size || 0);
+          const tradeTime = msg.time ? Math.floor(new Date(msg.time).getTime() / 1000) : Math.floor(Date.now() / 1000);
+          const candleStart = Math.floor(tradeTime / bucketSec) * bucketSec;
+
+          setBars((prevBars) => {
+            if (!prevBars.length) return prevBars;
+            const lastBar = prevBars[prevBars.length - 1];
+
+            if (candleStart === lastBar.time) {
+              const updatedBar = {
+                ...lastBar,
+                high: Math.max(lastBar.high, price),
+                low: Math.min(lastBar.low, price),
+                close: price,
+                volume: lastBar.volume + tradeSize,
+              };
+              const updated = [...prevBars];
+              updated[updated.length - 1] = updatedBar;
+              return updated;
+            } else if (candleStart > lastBar.time) {
+              const newBar = {
+                time: candleStart,
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: tradeSize,
+              };
+              return [...prevBars.slice(1), newBar];
+            }
+            return prevBars;
+          });
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        if (!isCancelled) setLiveState("Reconnecting…");
+      };
+
+      ws.onclose = () => {
+        if (!isCancelled) {
+          setLiveState("Reconnecting…");
+          reconnectTimer = setTimeout(connectCoinbase, 3000);
+        }
+      };
+    };
+
+    const connectBinance = () => {
+      if (isCancelled) return;
+      setLiveState("Connecting…");
+      const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
+      const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
+      ws = new WebSocket(`wss://stream.binance.us:9443/ws/${streamName}`);
+
+      ws.onopen = () => {
+        if (!isCancelled) setLiveState("● LIVE (Binance.US)");
       };
 
       ws.onmessage = (event) => {
@@ -99,7 +176,6 @@ export default function App() {
           setBars((prevBars) => {
             if (!prevBars.length) return prevBars;
             const lastBar = prevBars[prevBars.length - 1];
-            // Update current candle if timestamps match; append new candle if interval rolled over
             if (lastBar.time === liveBar.time) {
               const updated = [...prevBars];
               updated[updated.length - 1] = liveBar;
@@ -109,9 +185,7 @@ export default function App() {
             }
             return prevBars;
           });
-        } catch {
-          // Ignore malformed frames
-        }
+        } catch {}
       };
 
       ws.onerror = () => {
@@ -121,12 +195,16 @@ export default function App() {
       ws.onclose = () => {
         if (!isCancelled) {
           setLiveState("Reconnecting…");
-          reconnectTimer = setTimeout(connect, 3000);
+          reconnectTimer = setTimeout(connectBinance, 3000);
         }
       };
     };
 
-    connect();
+    if (dataSource === "coinbase") {
+      connectCoinbase();
+    } else {
+      connectBinance();
+    }
 
     return () => {
       isCancelled = true;
@@ -135,7 +213,7 @@ export default function App() {
         ws.close();
       }
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, dataSource, bars.length > 0]);
 
   const onSubmit = (e) => {
     e.preventDefault();
@@ -147,6 +225,8 @@ export default function App() {
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2];
   const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
+  const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
+  const chgText = chgPct != null ? chgPct.toFixed(2) : "0.00";
 
   return (
     <div className="app">
@@ -192,8 +272,8 @@ export default function App() {
               <strong>{last.close}</strong>{" "}
               {chgPct != null && (
                 <span className={chgPct >= 0 ? "up" : "down"}>
-                  {chgPct >= 0 ? "+" : ""}
-                  {chgPct.toFixed(2)}%
+                  {chgSign}
+                  {chgText}%
                 </span>
               )}
             </>
@@ -216,18 +296,16 @@ export default function App() {
       <footer className={`status${error ? " error" : ""}`}>
         {error || (
           <>
-            <span style={{ color: liveState === "● LIVE" ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
+            <span style={{ color: liveState.startsWith("● LIVE") ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
               {liveState}
             </span>
             {" · "}
             {last
-              ? `${displaySymbol(symbol)} · ${interval.toUpperCase()} · last ${last.close} (${
-                  chgPct >= 0 ? "+" : ""
-                }${chgPct != null ? chgPct.toFixed(2) : "0.00"}%)`
+              ? `${displaySymbol(symbol)} · ${interval.toUpperCase()} · last ${last.close} (${chgSign}${chgText}%)`
               : status}
           </>
         )}
-        <span className="hint"> · $0 stack: React + Lightweight Charts + Binance.US WebSocket</span>
+        <span className="hint"> · $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
       </footer>
     </div>
   );

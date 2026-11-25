@@ -71,6 +71,7 @@ export default function App() {
   const [showMacd, setShowMacd] = useState(false);
 
   // Drawing tools (client-side ? free, no TV)
+  const [showIndBox, setShowIndBox] = useState(false);
   const [showDrawBox, setShowDrawBox] = useState(false);
   const [drawTool, setDrawTool] = useState("none");
   const [drawings, setDrawings] = useState([]);
@@ -294,27 +295,43 @@ export default function App() {
           ))}
         </div>
 
-        <label className="hint">
-          <input type="checkbox" checked={showSma50} onChange={(e) => setShowSma50(e.target.checked)} /> SMA 50
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showSma200} onChange={(e) => setShowSma200(e.target.checked)} /> SMA 200
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showEma9} onChange={(e) => setShowEma9(e.target.checked)} /> EMA 9
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showEma21} onChange={(e) => setShowEma21(e.target.checked)} /> EMA 21
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showBb} onChange={(e) => setShowBb(e.target.checked)} /> BB
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showRsi} onChange={(e) => setShowRsi(e.target.checked)} /> RSI
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} /> MACD
-        </label>
+        <div className="intervals">
+          <button
+            type="button"
+            className={"interval-btn" + (showIndBox ? " active" : "")}
+            onClick={() => setShowIndBox((v) => !v)}
+          >
+            {showIndBox ? "Hide indicators" : "Indicators"}
+          </button>
+        </div>
+
+        {showIndBox ? (
+          <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 520 }}>
+            <label className="hint">
+              <input type="checkbox" checked={showSma50} onChange={(e) => setShowSma50(e.target.checked)} /> SMA 50
+            </label>
+            <label className="hint">
+              <input type="checkbox" checked={showSma200} onChange={(e) => setShowSma200(e.target.checked)} /> SMA 200
+            </label>
+            <label className="hint">
+              <input type="checkbox" checked={showEma9} onChange={(e) => setShowEma9(e.target.checked)} /> EMA 9
+            </label>
+            <label className="hint">
+              <input type="checkbox" checked={showEma21} onChange={(e) => setShowEma21(e.target.checked)} /> EMA 21
+            </label>
+            <label className="hint">
+              <input type="checkbox" checked={showBb} onChange={(e) => setShowBb(e.target.checked)} /> BB
+            </label>
+            <label className="hint">
+              <input type="checkbox" checked={showRsi} onChange={(e) => setShowRsi(e.target.checked)} /> RSI
+            </label>
+            <label className="hint">
+              <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} /> MACD
+            </label>
+          </div>
+        ) : null}
+
+
 
         <div className="intervals">
           <button

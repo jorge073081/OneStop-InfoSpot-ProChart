@@ -541,7 +541,21 @@ export default function CandleChart({
       }
     };
 
+
     priceChart.subscribeClick(clickHandler);
+
+    // Double-click: fit/center view only — does NOT clear drawings
+    const dblHandler = () => {
+      try {
+        priceChart.timeScale().fitContent();
+      } catch (_) {}
+    };
+    if (typeof priceChart.subscribeDblClick === "function") {
+      try {
+        priceChart.subscribeDblClick(dblHandler);
+      } catch (_) {}
+    }
+
 
     const s = {
       priceChart,
@@ -598,6 +612,11 @@ export default function CandleChart({
       try {
         priceChart.unsubscribeClick(clickHandler);
       } catch (_) {}
+      if (typeof priceChart.unsubscribeDblClick === "function") {
+        try {
+          priceChart.unsubscribeDblClick(dblHandler);
+        } catch (_) {}
+      }
       priceChart.remove();
       if (rsiChart) rsiChart.remove();
       if (macdChart) macdChart.remove();

@@ -39,13 +39,18 @@ export default function App() {
   const [status, setStatus] = useState("Loading…");
   const [liveState, setLiveState] = useState("Connecting…");
   const [error, setError] = useState("");
+  const [showIndBox, setShowIndBox] = useState(false);
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
   const [showEma9, setShowEma9] = useState(false);
   const [showEma21, setShowEma21] = useState(false);
+  const [showEma50, setShowEma50] = useState(false);
   const [showBb, setShowBb] = useState(false);
+  const [showVwap, setShowVwap] = useState(false);
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(false);
+  const [showStoch, setShowStoch] = useState(false);
+  const [showAtr, setShowAtr] = useState(false);
 
   // Drawing tools (client-side — free, no TV)
   const [showDrawBox, setShowDrawBox] = useState(false);
@@ -271,27 +276,37 @@ export default function App() {
           ))}
         </div>
 
-        <label className="hint">
-          <input type="checkbox" checked={showSma50} onChange={(e) => setShowSma50(e.target.checked)} /> SMA 50
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showSma200} onChange={(e) => setShowSma200(e.target.checked)} /> SMA 200
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showEma9} onChange={(e) => setShowEma9(e.target.checked)} /> EMA 9
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showEma21} onChange={(e) => setShowEma21(e.target.checked)} /> EMA 21
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showBb} onChange={(e) => setShowBb(e.target.checked)} /> BB
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showRsi} onChange={(e) => setShowRsi(e.target.checked)} /> RSI
-        </label>
-        <label className="hint">
-          <input type="checkbox" checked={showMacd} onChange={(e) => setShowMacd(e.target.checked)} /> MACD
-        </label>
+        <div className="intervals">
+          <button
+            type="button"
+            className={`interval-btn${showIndBox ? " active" : ""}`}
+            onClick={() => setShowIndBox((v) => !v)}
+          >
+            {showIndBox ? "Hide indicators" : "Indicators"}
+          </button>
+        </div>
+
+        {showIndBox ? (
+          <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 560 }}>
+            {[
+              ["SMA 50", showSma50, setShowSma50],
+              ["SMA 200", showSma200, setShowSma200],
+              ["EMA 9", showEma9, setShowEma9],
+              ["EMA 21", showEma21, setShowEma21],
+              ["EMA 50", showEma50, setShowEma50],
+              ["BB", showBb, setShowBb],
+              ["VWAP", showVwap, setShowVwap],
+              ["RSI", showRsi, setShowRsi],
+              ["MACD", showMacd, setShowMacd],
+              ["Stoch", showStoch, setShowStoch],
+              ["ATR", showAtr, setShowAtr],
+            ].map(([label, val, set]) => (
+              <label key={label} className="hint" style={{ marginRight: 6 }}>
+                <input type="checkbox" checked={val} onChange={(e) => set(e.target.checked)} /> {label}
+              </label>
+            ))}
+          </div>
+        ) : null}
 
         <div className="intervals">
           <button
@@ -403,9 +418,13 @@ export default function App() {
             showSma200={showSma200}
             showEma9={showEma9}
             showEma21={showEma21}
+            showEma50={showEma50}
             showBb={showBb}
+            showVwap={showVwap}
             showRsi={showRsi}
             showMacd={showMacd}
+            showStoch={showStoch}
+            showAtr={showAtr}
             drawTool={drawTool}
             drawings={drawings}
             onAddDrawing={(d) => setDrawings((prev) => [...prev, d])}
@@ -431,7 +450,7 @@ export default function App() {
               : status}
           </>
         )}
-        <span className="hint"> · $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
+        <span className="hint"> · Double-click chart to fit · $0 stack: LWC + Coinbase / Binance.US</span>
       </footer>
     </div>
   );

@@ -6,7 +6,7 @@
  * Stocks are NOT on Binance — this v1 is crypto-first and free.
  */
 
-const BINANCE = "https://api.binance.com/api/v3/klines";
+const BINANCE = "https://api.binance.us/api/v3/klines";
 
 export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
   const url = new URL(BINANCE);

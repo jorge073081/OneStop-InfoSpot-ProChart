@@ -3,20 +3,18 @@
  * No API keys required.
  */
 
-const COINBASE = "https://coinbase.com";
-const BINANCE_US = "https://binance.us";
+const COINBASE = "https://api.exchange.coinbase.com";
+const BINANCE_US = "https://api.binance.us/api/v3/klines";
 
-// Map Chart Desk intervals to Coinbase granularity (in seconds)
 const CB_GRANULARITY = {
   "1m": 60,
   "5m": 300,
   "15m": 900,
   "1h": 3600,
-  "4h": 21600, // Coinbase uses 6h (21600) natively; 4h falls back to Binance.US for exact 4h bars
+  "4h": 21600,
   "1d": 86400,
 };
 
-// Convert "BTCUSDT" or "BTC-USD" -> "BTC-USD" for Coinbase
 export function toCoinbaseProduct(symbol) {
   const s = symbol.toUpperCase().trim();
   if (s.includes("-")) return s;
@@ -26,7 +24,6 @@ export function toCoinbaseProduct(symbol) {
 }
 
 async function fetchCoinbaseOHLCV(symbol, interval, limit = 300) {
-  // Use Binance.US for 4h and 1w so candle boundaries stay exact
   if (interval === "4h" || interval === "1w") {
     throw new Error("Use Binance.US for 4h/1w");
   }
@@ -71,6 +68,7 @@ async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
     );
   }
   const raw = await res.json();
+  // Binance returns: [ openTime, open, high, low, close, volume, closeTime, ... ]
   return raw.map((k) => ({
     time: Math.floor(k[0] / 1000),
     open: parseFloat(k[1]),
@@ -91,7 +89,6 @@ export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
   }
 }
 
-/** Simple SMA on close */
 export function sma(bars, period) {
   const out = [];
   let sum = 0;
@@ -105,7 +102,6 @@ export function sma(bars, period) {
   return out;
 }
 
-/** RSI (Wilder) on close */
 export function rsi(bars, period = 14) {
   if (bars.length < period + 1) return [];
   const out = [];

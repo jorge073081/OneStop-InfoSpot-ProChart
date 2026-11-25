@@ -110,8 +110,8 @@ export default function App() {
   useEffect(() => {
     if (!bars.length) return;
     // Stocks (Yahoo) have no free websocket here - chart is historical + manual reload
-    if (dataSource === "yahoo" || assetKind(symbol) === "stock") {
-      setLiveState("HIST (Yahoo stocks)");
+    if (dataSource === "yahoo" || dataSource === "stooq" || assetKind(symbol) === "stock") {
+      setLiveState(dataSource === "stooq" ? "HIST (Stooq stocks)" : "HIST (Yahoo stocks)");
       return;
     }
 

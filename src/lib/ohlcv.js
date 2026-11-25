@@ -40,7 +40,6 @@ async function fetchCoinbaseOHLCV(symbol, interval, limit = 300) {
     throw new Error("Empty Coinbase response");
   }
 
-  // Coinbase returns newest-first: [ time, low, high, open, close, volume ]
   return raw
     .slice(0, limit)
     .reverse()
@@ -68,7 +67,6 @@ async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
     );
   }
   const raw = await res.json();
-  // Binance returns: [ openTime, open, high, low, close, volume, closeTime, ... ]
   return raw.map((k) => ({
     time: Math.floor(k[0] / 1000),
     open: parseFloat(k[1]),
@@ -100,6 +98,64 @@ export function sma(bars, period) {
     }
   }
   return out;
+}
+
+export function ema(bars, period) {
+  if (!bars?.length) return [];
+  const k = 2 / (period + 1);
+  const out = [];
+  let prev = bars[0].close;
+  for (let i = 0; i < bars.length; i++) {
+    const v = i === 0 ? bars[0].close : bars[i].close * k + prev * (1 - k);
+    prev = v;
+    if (i >= period - 1) out.push({ time: bars[i].time, value: v });
+  }
+  return out;
+}
+
+export function bollinger(bars, period = 20, mult = 2) {
+  const mid = [];
+  const upper = [];
+  const lower = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (i < period - 1) continue;
+    const slice = bars.slice(i - period + 1, i + 1).map((b) => b.close);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+    const sd = Math.sqrt(variance);
+    mid.push({ time: bars[i].time, value: mean });
+    upper.push({ time: bars[i].time, value: mean + mult * sd });
+    lower.push({ time: bars[i].time, value: mean - mult * sd });
+  }
+  return { mid, upper, lower };
+}
+
+export function macd(bars, fast = 12, slow = 26, signal = 9) {
+  if (!bars?.length) return { macdLine: [], signalLine: [], hist: [] };
+  const emaFast = ema(bars, fast);
+  const emaSlow = ema(bars, slow);
+  const slowMap = new Map(emaSlow.map((p) => [p.time, p.value]));
+  const macdLine = [];
+  for (const p of emaFast) {
+    if (!slowMap.has(p.time)) continue;
+    macdLine.push({ time: p.time, value: p.value - slowMap.get(p.time) });
+  }
+  if (macdLine.length < signal) return { macdLine, signalLine: [], hist: [] };
+  const k = 2 / (signal + 1);
+  const signalLine = [];
+  let prev = macdLine[0].value;
+  for (let i = 0; i < macdLine.length; i++) {
+    const v = i === 0 ? macdLine[0].value : macdLine[i].value * k + prev * (1 - k);
+    prev = v;
+    if (i >= signal - 1) signalLine.push({ time: macdLine[i].time, value: v });
+  }
+  const sigMap = new Map(signalLine.map((p) => [p.time, p.value]));
+  const hist = [];
+  for (const p of macdLine) {
+    if (!sigMap.has(p.time)) continue;
+    hist.push({ time: p.time, value: p.value - sigMap.get(p.time) });
+  }
+  return { macdLine, signalLine, hist };
 }
 
 export function rsi(bars, period = 14) {

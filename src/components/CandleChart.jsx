@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
-import { sma, ema, rsi, bollinger, macd, stoch, atr, vwap } from "../lib/ohlcv.js";
+import { sma, ema, rsi, bollinger, macd } from "../lib/ohlcv.js";
 
 const COLORS = {
   bg: "#12161c",
@@ -27,13 +27,9 @@ export default function CandleChart({
   showSma200,
   showEma9,
   showEma21,
-  showEma50,
   showBb,
-  showVwap,
   showRsi,
   showMacd,
-  showStoch,
-  showAtr,
   drawTool = "none",
   drawings = [],
   onAddDrawing,
@@ -43,8 +39,6 @@ export default function CandleChart({
   const priceRef = useRef(null);
   const rsiRef = useRef(null);
   const macdRef = useRef(null);
-  const stochRef = useRef(null);
-  const atrRef = useRef(null);
 
   const seriesRef = useRef({
     priceChart: null,
@@ -56,18 +50,13 @@ export default function CandleChart({
     sma200: null,
     ema9: null,
     ema21: null,
-    ema50: null,
     bbMid: null,
     bbUpper: null,
     bbLower: null,
-    vwap: null,
     rsi: null,
     macdLine: null,
     macdSignal: null,
     macdHist: null,
-    stochK: null,
-    stochD: null,
-    atr: null,
     priceLines: [],
     trendSeries: [],
     datasetKey: null,
@@ -406,12 +395,6 @@ export default function CandleChart({
     const ema21Series = showEma21
       ? priceChart.addLineSeries({ color: COLORS.ema21, lineWidth: 2, title: "EMA 21" })
       : null;
-    const ema50Series = showEma50
-      ? priceChart.addLineSeries({ color: "#34d399", lineWidth: 2, title: "EMA 50" })
-      : null;
-    const vwapSeries = showVwap
-      ? priceChart.addLineSeries({ color: "#f472b6", lineWidth: 2, title: "VWAP" })
-      : null;
     const bbMid = showBb
       ? priceChart.addLineSeries({ color: COLORS.bb, lineWidth: 1, title: "BB mid" })
       : null;
@@ -471,58 +454,18 @@ export default function CandleChart({
       macdSignalSeries = macdChart.addLineSeries({ color: COLORS.signal, lineWidth: 2 });
     }
 
-    let stochChart = null;
-    let stochKSeries = null;
-    let stochDSeries = null;
-    if (showStoch && stochRef.current) {
-      stochChart = createChart(stochRef.current, {
-        layout: {
-          background: { type: ColorType.Solid, color: COLORS.bg },
-          textColor: COLORS.text,
-          fontFamily: "IBM Plex Sans, system-ui, sans-serif",
-        },
-        grid: {
-          vertLines: { color: COLORS.grid },
-          horzLines: { color: COLORS.grid },
-        },
-        rightPriceScale: { borderVisible: false },
-        timeScale: { borderVisible: false, visible: false },
-        width: stochRef.current.clientWidth,
-        height: stochRef.current.clientHeight,
-      });
-      stochKSeries = stochChart.addLineSeries({ color: "#22d3ee", lineWidth: 2 });
-      stochDSeries = stochChart.addLineSeries({ color: "#f59e0b", lineWidth: 2 });
-    }
-
-    let atrChart = null;
-    let atrSeries = null;
-    if (showAtr && atrRef.current) {
-      atrChart = createChart(atrRef.current, {
-        layout: {
-          background: { type: ColorType.Solid, color: COLORS.bg },
-          textColor: COLORS.text,
-          fontFamily: "IBM Plex Sans, system-ui, sans-serif",
-        },
-        grid: {
-          vertLines: { color: COLORS.grid },
-          horzLines: { color: COLORS.grid },
-        },
-        rightPriceScale: { borderVisible: false },
-        timeScale: { borderVisible: false, visible: false },
-        width: atrRef.current.clientWidth,
-        height: atrRef.current.clientHeight,
-      });
-      atrSeries = atrChart.addLineSeries({ color: "#fb7185", lineWidth: 2 });
-    }
-
     const link = (a, b) => {
       if (!a || !b) return;
       a.timeScale().subscribeVisibleLogicalRangeChange((range) => {
         if (range) b.timeScale().setVisibleLogicalRange(range);
       });
     };
-    const panes = [priceChart, rsiChart, macdChart, stochChart, atrChart].filter(Boolean);
-    panes.forEach((a) => panes.forEach((b) => { if (a !== b) link(a, b); }));
+    link(priceChart, rsiChart);
+    link(rsiChart, priceChart);
+    link(priceChart, macdChart);
+    link(macdChart, priceChart);
+    link(rsiChart, macdChart);
+    link(macdChart, rsiChart);
 
     const clickHandler = (param) => {
       const tool = toolRef.current;
@@ -600,18 +543,6 @@ export default function CandleChart({
 
     priceChart.subscribeClick(clickHandler);
 
-    // Double-click → fit content (keeps drawings)
-    const dblHandler = () => {
-      try {
-        priceChart.timeScale().fitContent();
-      } catch (_) {}
-    };
-    try {
-      priceChart.subscribeDblClick(dblHandler);
-    } catch (_) {
-      // older LWC: no-op
-    }
-
     const s = {
       priceChart,
       rsiChart,
@@ -622,20 +553,13 @@ export default function CandleChart({
       sma200: sma200Series,
       ema9: ema9Series,
       ema21: ema21Series,
-      ema50: ema50Series,
       bbMid,
       bbUpper,
       bbLower,
-      vwap: vwapSeries,
       rsi: rsiSeries,
       macdLine: macdLineSeries,
       macdSignal: macdSignalSeries,
       macdHist: macdHistSeries,
-      stochK: stochKSeries,
-      stochD: stochDSeries,
-      atr: atrSeries,
-      stochChart,
-      atrChart,
       priceLines: [],
       trendSeries: [],
       datasetKey: null,
@@ -666,18 +590,6 @@ export default function CandleChart({
           height: macdRef.current.clientHeight,
         });
       }
-      if (stochChart && stochRef.current) {
-        stochChart.applyOptions({
-          width: stochRef.current.clientWidth,
-          height: stochRef.current.clientHeight,
-        });
-      }
-      if (atrChart && atrRef.current) {
-        atrChart.applyOptions({
-          width: atrRef.current.clientWidth,
-          height: atrRef.current.clientHeight,
-        });
-      }
     };
     window.addEventListener("resize", onResize);
 
@@ -689,11 +601,6 @@ export default function CandleChart({
       priceChart.remove();
       if (rsiChart) rsiChart.remove();
       if (macdChart) macdChart.remove();
-      if (stochChart) stochChart.remove();
-      if (atrChart) atrChart.remove();
-      try {
-        priceChart.unsubscribeDblClick(dblHandler);
-      } catch (_) {}
       seriesRef.current = {
         priceChart: null,
         rsiChart: null,
@@ -718,7 +625,7 @@ export default function CandleChart({
         _posMarkers: [],
       };
     };
-  }, [showSma50, showSma200, showEma9, showEma21, showEma50, showBb, showVwap, showRsi, showMacd, showStoch, showAtr]);
+  }, [showSma50, showSma200, showEma9, showEma21, showBb, showRsi, showMacd]);
 
   // Sync drawings list
   useEffect(() => {
@@ -821,8 +728,6 @@ export default function CandleChart({
       if (s.sma200) s.sma200.setData(sma(bars, 200));
       if (s.ema9) s.ema9.setData(ema(bars, 9));
       if (s.ema21) s.ema21.setData(ema(bars, 21));
-      if (s.ema50) s.ema50.setData(ema(bars, 50));
-      if (s.vwap) s.vwap.setData(vwap(bars));
       if (s.bbMid) {
         const bb = bollinger(bars, 20, 2);
         s.bbMid.setData(bb.mid);
@@ -830,12 +735,6 @@ export default function CandleChart({
         s.bbLower.setData(bb.lower);
       }
       if (s.rsi) s.rsi.setData(rsi(bars, 14));
-      if (s.stochK) {
-        const st = stoch(bars, 14, 3);
-        s.stochK.setData(st.k);
-        s.stochD.setData(st.d);
-      }
-      if (s.atr) s.atr.setData(atr(bars, 14));
       if (s.macdLine) {
         const m = macd(bars);
         s.macdLine.setData(m.macdLine);
@@ -880,23 +779,6 @@ export default function CandleChart({
         const d = ema(bars, 21);
         if (d.length) s.ema21.update(d[d.length - 1]);
       }
-      if (s.ema50) {
-        const d = ema(bars, 50);
-        if (d.length) s.ema50.update(d[d.length - 1]);
-      }
-      if (s.vwap) {
-        const d = vwap(bars);
-        if (d.length) s.vwap.update(d[d.length - 1]);
-      }
-      if (s.stochK) {
-        const st = stoch(bars, 14, 3);
-        if (st.k.length) s.stochK.update(st.k[st.k.length - 1]);
-        if (st.d.length) s.stochD.update(st.d[st.d.length - 1]);
-      }
-      if (s.atr) {
-        const d = atr(bars, 14);
-        if (d.length) s.atr.update(d[d.length - 1]);
-      }
       if (s.rsi) {
         const d = rsi(bars, 14);
         if (d.length) s.rsi.update(d[d.length - 1]);
@@ -915,7 +797,7 @@ export default function CandleChart({
         }
       }
     }
-  }, [bars, showSma50, showSma200, showEma9, showEma21, showEma50, showBb, showVwap, showRsi, showMacd, showStoch, showAtr]);
+  }, [bars, showSma50, showSma200, showEma9, showEma21, showBb, showRsi, showMacd]);
 
   return (
     <>
@@ -930,16 +812,6 @@ export default function CandleChart({
       {showMacd ? (
         <div className="chart-panel rsi">
           <div className="chart-el" ref={macdRef} />
-        </div>
-      ) : null}
-      {showStoch ? (
-        <div className="chart-panel rsi">
-          <div className="chart-el" ref={stochRef} />
-        </div>
-      ) : null}
-      {showAtr ? (
-        <div className="chart-panel rsi">
-          <div className="chart-el" ref={atrRef} />
         </div>
       ) : null}
     </>

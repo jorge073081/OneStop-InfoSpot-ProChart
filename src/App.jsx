@@ -20,10 +20,10 @@ function writeParams(symbol, interval) {
 }
 
 /**
- * Chart Desk v0.1 — free stack only:
+ * Chart Desk v0.2 — live WebSocket stack ($0):
  * - React + Vite (open source)
  * - Lightweight Charts (Apache-2.0)
- * - Binance public klines (no API key)
+ * - Binance.US public klines REST + live WebSocket stream (no API key)
  */
 export default function App() {
   const initial = useMemo(() => readParams(), []);
@@ -32,6 +32,7 @@ export default function App() {
   const [interval, setInterval] = useState(initial.interval);
   const [bars, setBars] = useState([]);
   const [status, setStatus] = useState("Loading…");
+  const [liveState, setLiveState] = useState("Connecting…");
   const [error, setError] = useState("");
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
@@ -49,7 +50,7 @@ export default function App() {
       const prev = data[data.length - 2];
       const chg = prev ? ((last.close / prev.close - 1) * 100).toFixed(2) : "0.00";
       setStatus(
-        `${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${Number(chg) >= 0 ? "+" : ""}${chg}%) · free Binance data`
+        `${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${Number(chg) >= 0 ? "+" : ""}${chg}%)`
       );
     } catch (e) {
       setBars([]);
@@ -61,6 +62,80 @@ export default function App() {
   useEffect(() => {
     load(symbol, interval);
   }, [symbol, interval, load]);
+
+  // Live Binance.US WebSocket stream for the active symbol & interval
+  useEffect(() => {
+    const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
+    const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
+    const wsUrl = `wss://stream.binance.us:9443/ws/${streamName}`;
+
+    let ws;
+    let reconnectTimer;
+    let isCancelled = false;
+
+    const connect = () => {
+      if (isCancelled) return;
+      setLiveState("Connecting…");
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        if (!isCancelled) setLiveState("● LIVE");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (!msg.k) return;
+          const k = msg.k;
+          const liveBar = {
+            time: Math.floor(k.t / 1000),
+            open: parseFloat(k.o),
+            high: parseFloat(k.h),
+            low: parseFloat(k.l),
+            close: parseFloat(k.c),
+            volume: parseFloat(k.v),
+          };
+
+          setBars((prevBars) => {
+            if (!prevBars.length) return prevBars;
+            const lastBar = prevBars[prevBars.length - 1];
+            // Update current candle if timestamps match; append new candle if interval rolled over
+            if (lastBar.time === liveBar.time) {
+              const updated = [...prevBars];
+              updated[updated.length - 1] = liveBar;
+              return updated;
+            } else if (liveBar.time > lastBar.time) {
+              return [...prevBars.slice(1), liveBar];
+            }
+            return prevBars;
+          });
+        } catch {
+          // Ignore malformed frames
+        }
+      };
+
+      ws.onerror = () => {
+        if (!isCancelled) setLiveState("Reconnecting…");
+      };
+
+      ws.onclose = () => {
+        if (!isCancelled) {
+          setLiveState("Reconnecting…");
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(reconnectTimer);
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close();
+      }
+    };
+  }, [symbol, interval]);
 
   const onSubmit = (e) => {
     e.preventDefault();
@@ -139,8 +214,20 @@ export default function App() {
       </main>
 
       <footer className={`status${error ? " error" : ""}`}>
-        {error || status}
-        <span className="hint"> · $0 stack: React + Lightweight Charts + Binance public API</span>
+        {error || (
+          <>
+            <span style={{ color: liveState === "● LIVE" ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
+              {liveState}
+            </span>
+            {" · "}
+            {last
+              ? `${displaySymbol(symbol)} · ${interval.toUpperCase()} · last ${last.close} (${
+                  chgPct >= 0 ? "+" : ""
+                }${chgPct != null ? chgPct.toFixed(2) : "0.00"}%)`
+              : status}
+          </>
+        )}
+        <span className="hint"> · $0 stack: React + Lightweight Charts + Binance.US WebSocket</span>
       </footer>
     </div>
   );

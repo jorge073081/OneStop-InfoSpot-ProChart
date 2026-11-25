@@ -1,15 +1,64 @@
 /**
- * Free OHLCV via Binance public REST (no API key).
- * Docs: https://binance-docs.github.io/apidocs/spot/en/#kline-candlestick-data
- *
- * Limits: public rate limits apply; fine for personal use.
- * Stocks are NOT on Binance — this v1 is crypto-first and free.
+ * Free OHLCV via Coinbase Exchange public API (primary) + Binance.US public API (fallback).
+ * No API keys required.
  */
 
-const BINANCE = "https://api.binance.us/api/v3/klines";
+const COINBASE = "https://coinbase.com";
+const BINANCE_US = "https://binance.us";
 
-export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
-  const url = new URL(BINANCE);
+// Map Chart Desk intervals to Coinbase granularity (in seconds)
+const CB_GRANULARITY = {
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "1h": 3600,
+  "4h": 21600, // Coinbase uses 6h (21600) natively; 4h falls back to Binance.US for exact 4h bars
+  "1d": 86400,
+};
+
+// Convert "BTCUSDT" or "BTC-USD" -> "BTC-USD" for Coinbase
+export function toCoinbaseProduct(symbol) {
+  const s = symbol.toUpperCase().trim();
+  if (s.includes("-")) return s;
+  if (s.endsWith("USDT")) return `${s.slice(0, -4)}-USD`;
+  if (s.endsWith("USD")) return `${s.slice(0, -3)}-USD`;
+  return `${s}-USD`;
+}
+
+async function fetchCoinbaseOHLCV(symbol, interval, limit = 300) {
+  // Use Binance.US for 4h and 1w so candle boundaries stay exact
+  if (interval === "4h" || interval === "1w") {
+    throw new Error("Use Binance.US for 4h/1w");
+  }
+  const granularity = CB_GRANULARITY[interval];
+  if (!granularity) throw new Error("Unsupported Coinbase interval");
+
+  const product = toCoinbaseProduct(symbol);
+  const url = `${COINBASE}/products/${product}/candles?granularity=${granularity}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Coinbase ${res.status}`);
+
+  const raw = await res.json();
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error("Empty Coinbase response");
+  }
+
+  // Coinbase returns newest-first: [ time, low, high, open, close, volume ]
+  return raw
+    .slice(0, limit)
+    .reverse()
+    .map((k) => ({
+      time: Number(k[0]),
+      low: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      open: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume: parseFloat(k[5]),
+    }));
+}
+
+async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
+  const url = new URL(BINANCE_US);
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("interval", interval);
   url.searchParams.set("limit", String(Math.min(1000, Math.max(50, limit))));
@@ -18,19 +67,28 @@ export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `Binance ${res.status}: ${text || res.statusText}. Check symbol (e.g. BTCUSDT, XRPUSDT).`
+      `Binance.US ${res.status}: ${text || res.statusText}. Check symbol (e.g. BTCUSDT, XRPUSDT).`
     );
   }
   const raw = await res.json();
-  // [ openTime, open, high, low, close, volume, closeTime, ... ]
   return raw.map((k) => ({
-    time: Math.floor(k[0] / 1000), // seconds for Lightweight Charts
+    time: Math.floor(k[0] / 1000),
     open: parseFloat(k[1]),
     high: parseFloat(k[2]),
     low: parseFloat(k[3]),
     close: parseFloat(k[4]),
     volume: parseFloat(k[5]),
   }));
+}
+
+export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
+  try {
+    const bars = await fetchCoinbaseOHLCV(symbol, interval, 300);
+    return { bars, source: "coinbase" };
+  } catch {
+    const bars = await fetchBinanceOHLCV(symbol, interval, limit);
+    return { bars, source: "binance" };
+  }
 }
 
 /** Simple SMA on close */

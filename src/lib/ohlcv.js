@@ -1,10 +1,15 @@
 /**
- * Free OHLCV via Coinbase Exchange public API (primary) + Binance.US public API (fallback).
- * No API keys required.
+ * Free OHLCV:
+ *  - Crypto: Coinbase (primary) + Binance.US (fallback)
+ *  - Stocks: Yahoo Finance chart API (no API key)
+ * No paid keys required.
  */
+
+import { assetKind } from "./symbols.js";
 
 const COINBASE = "https://api.exchange.coinbase.com";
 const BINANCE_US = "https://api.binance.us/api/v3/klines";
+const YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/";
 
 const CB_GRANULARITY = {
   "1m": 60,
@@ -18,9 +23,9 @@ const CB_GRANULARITY = {
 export function toCoinbaseProduct(symbol) {
   const s = symbol.toUpperCase().trim();
   if (s.includes("-")) return s;
-  if (s.endsWith("USDT")) return `${s.slice(0, -4)}-USD`;
-  if (s.endsWith("USD")) return `${s.slice(0, -3)}-USD`;
-  return `${s}-USD`;
+  if (s.endsWith("USDT")) return s.slice(0, -4) + "-USD";
+  if (s.endsWith("USD")) return s.slice(0, -3) + "-USD";
+  return s + "-USD";
 }
 
 async function fetchCoinbaseOHLCV(symbol, interval, limit = 300) {
@@ -31,9 +36,9 @@ async function fetchCoinbaseOHLCV(symbol, interval, limit = 300) {
   if (!granularity) throw new Error("Unsupported Coinbase interval");
 
   const product = toCoinbaseProduct(symbol);
-  const url = `${COINBASE}/products/${product}/candles?granularity=${granularity}`;
+  const url = COINBASE + "/products/" + product + "/candles?granularity=" + granularity;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Coinbase ${res.status}`);
+  if (!res.ok) throw new Error("Coinbase " + res.status);
 
   const raw = await res.json();
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -63,7 +68,7 @@ async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `Binance.US ${res.status}: ${text || res.statusText}. Check symbol (e.g. BTCUSDT, XRPUSDT).`
+      "Binance.US " + res.status + ": " + (text || res.statusText) + ". Check symbol (e.g. BTCUSDT, XRPUSDT)."
     );
   }
   const raw = await res.json();
@@ -77,7 +82,92 @@ async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
   }));
 }
 
+const YAHOO_INTERVAL = {
+  "1m": { interval: "1m", range: "7d" },
+  "5m": { interval: "5m", range: "1mo" },
+  "15m": { interval: "15m", range: "1mo" },
+  "1h": { interval: "60m", range: "3mo" },
+  "4h": { interval: "60m", range: "6mo" },
+  "1d": { interval: "1d", range: "2y" },
+  "1w": { interval: "1wk", range: "10y" },
+};
+
+async function fetchJson(url) {
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+/**
+ * Yahoo chart API - free, no key.
+ * Browser may hit CORS; we try direct then a free CORS relay.
+ */
+async function fetchYahooOHLCV(symbol, interval = "1d") {
+  const map = YAHOO_INTERVAL[interval] || YAHOO_INTERVAL["1d"];
+  const path =
+    YAHOO +
+    encodeURIComponent(symbol) +
+    "?interval=" +
+    map.interval +
+    "&range=" +
+    map.range +
+    "&includePrePost=false";
+
+  let data;
+  try {
+    data = await fetchJson(path);
+  } catch (e1) {
+    // Free CORS fallback (no API key). May rate-limit under heavy use.
+    const proxied =
+      "https://corsproxy.io/?" + encodeURIComponent(path);
+    try {
+      data = await fetchJson(proxied);
+    } catch (e2) {
+      throw new Error(
+        "Yahoo stock fetch failed (CORS/network). Try again or use a crypto pair. " +
+          (e2.message || "")
+      );
+    }
+  }
+
+  const result = data && data.chart && data.chart.result && data.chart.result[0];
+  if (!result) throw new Error("No Yahoo data for " + symbol);
+  const quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
+  const ts = result.timestamp || [];
+  const opens = quote.open || [];
+  const highs = quote.high || [];
+  const lows = quote.low || [];
+  const closes = quote.close || [];
+  const vols = quote.volume || [];
+
+  const bars = [];
+  for (let i = 0; i < ts.length; i++) {
+    const o = opens[i];
+    const h = highs[i];
+    const l = lows[i];
+    const c = closes[i];
+    if (o == null || h == null || l == null || c == null) continue;
+    if (![o, h, l, c].every((x) => Number.isFinite(x))) continue;
+    bars.push({
+      time: ts[i],
+      open: o,
+      high: h,
+      low: l,
+      close: c,
+      volume: vols[i] != null ? vols[i] : 0,
+    });
+  }
+  if (!bars.length) throw new Error("Empty Yahoo bars for " + symbol);
+  return bars;
+}
+
 export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
+  if (assetKind(symbol) === "stock") {
+    const bars = await fetchYahooOHLCV(symbol, interval);
+    return { bars, source: "yahoo" };
+  }
   try {
     const bars = await fetchCoinbaseOHLCV(symbol, interval, 300);
     return { bars, source: "coinbase" };

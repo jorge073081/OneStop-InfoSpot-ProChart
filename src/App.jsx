@@ -111,7 +111,7 @@ export default function App() {
     if (!bars.length) return;
     // Stocks (Yahoo) have no free websocket here - chart is historical + manual reload
     if (dataSource === "yahoo" || dataSource === "stooq" || assetKind(symbol) === "stock") {
-      setLiveState(dataSource === "stooq" ? "HIST (Stooq stocks)" : "HIST (Yahoo stocks)");
+      setLiveState(dataSource === "stooq" ? "HIST (Stooq stocks)" : "HIST (stocks)");
       return;
     }
 

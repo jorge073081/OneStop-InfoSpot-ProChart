@@ -25,10 +25,8 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
     sma50: null,
     sma200: null,
     rsi: null,
-    lastLength: 0,
-    firstTime: null,
+    datasetKey: null,
   });
-  const isInitializedRef = useRef(false);
 
   useEffect(() => {
     if (!priceRef.current) return;
@@ -112,10 +110,8 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
       sma50: sma50Series,
       sma200: sma200Series,
       rsi: rsiSeries,
-      lastLength: 0,
-      firstTime: null,
+      datasetKey: null,
     };
-    isInitializedRef.current = false;
 
     const onResize = () => {
       if (priceRef.current) {
@@ -145,24 +141,20 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
         sma50: null,
         sma200: null,
         rsi: null,
-        lastLength: 0,
-        firstTime: null,
+        datasetKey: null,
       };
-      isInitializedRef.current = false;
     };
   }, [showSma50, showSma200, showRsi]);
 
   useEffect(() => {
     const s = seriesRef.current;
-    if (!s.candle || !bars?.length) return;
+    if (!s.candle || !bars || bars.length === 0) return;
 
-    const firstTime = bars[0].time;
-    const isSameSymbolOrTf =
-      isInitializedRef.current &&
-      s.lastLength === bars.length &&
-      Math.abs((s.firstTime || 0) - firstTime) <= 86400 * 7;
+    const first = bars[0];
+    const second = bars[1];
+    const currentKey = String(first.time) + "_" + String(second ? second.time : 0) + "_" + String(first.open);
 
-    if (!isSameSymbolOrTf) {
+    if (s.datasetKey !== currentKey) {
       s.candle.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
       s.volume.setData(
         bars.map((b) => ({
@@ -176,9 +168,7 @@ export default function CandleChart({ bars, showSma50, showSma200, showRsi }) {
       if (s.rsi) s.rsi.setData(rsi(bars, 14));
 
       s.priceChart.timeScale().fitContent();
-      s.firstTime = firstTime;
-      s.lastLength = bars.length;
-      isInitializedRef.current = true;
+      s.datasetKey = currentKey;
     } else {
       const last = bars[bars.length - 1];
       s.candle.update({

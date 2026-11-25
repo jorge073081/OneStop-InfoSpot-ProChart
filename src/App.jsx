@@ -452,7 +452,7 @@ export default function App() {
               : status}
           </>
         )}
-        <span className="hint"> ? $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
+        <span className="hint"> ? Double-click to fit | $0 stack: React + Lightweight Charts + Coinbase / Binance.US</span>
       </footer>
     </div>
   );

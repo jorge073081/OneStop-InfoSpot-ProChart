@@ -1,15 +1,14 @@
 /**
  * Free OHLCV:
  *  - Crypto: Coinbase (primary) + Binance.US (fallback)
- *  - Stocks: Yahoo Finance chart API (no API key)
- * No paid keys required.
+ *  - Stocks: Stooq (multi-TF, free) + Yahoo fallback
+ * No API keys.
  */
 
 import { assetKind } from "./symbols.js";
 
 const COINBASE = "https://api.exchange.coinbase.com";
 const BINANCE_US = "https://api.binance.us/api/v3/klines";
-const YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/";
 
 const CB_GRANULARITY = {
   "1m": 60,
@@ -68,7 +67,7 @@ async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      "Binance.US " + res.status + ": " + (text || res.statusText) + ". Check symbol (e.g. BTCUSDT, XRPUSDT)."
+      "Binance.US " + res.status + ": " + (text || res.statusText)
     );
   }
   const raw = await res.json();
@@ -82,8 +81,156 @@ async function fetchBinanceOHLCV(symbol, interval = "1d", limit = 500) {
   }));
 }
 
+async function fetchText(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.text();
+}
 
-const YAHOO_INTERVAL = {
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function firstOk(urls, asJson) {
+  let lastErr = null;
+  for (let i = 0; i < urls.length; i++) {
+    try {
+      if (asJson) return await fetchJson(urls[i]);
+      return await fetchText(urls[i]);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("All URLs failed");
+}
+
+function withCorsProxies(directUrl) {
+  return [
+    directUrl,
+    "https://corsproxy.io/?" + encodeURIComponent(directUrl),
+    "https://api.allorigins.win/raw?url=" + encodeURIComponent(directUrl),
+  ];
+}
+
+function toStooqSymbol(symbol) {
+  let s = String(symbol).toLowerCase().trim();
+  s = s.replace(/\./g, "-");
+  if (s.indexOf(".") === -1 && s.indexOf(".us") === -1) {
+    s = s + ".us";
+  }
+  return s;
+}
+
+/** Stooq interval codes: 1,5,15,30,60,h,d,w */
+const STOOQ_INTERVAL = {
+  "1m": null, // not available free reliably
+  "5m": "5",
+  "15m": "15",
+  "1h": "60",
+  "4h": "60", // aggregate from 60m
+  "1d": "d",
+  "1w": "w",
+};
+
+function parseStooqCsv(text) {
+  const lines = String(text).trim().split(/\r?\n/);
+  if (lines.length < 2) throw new Error("Empty Stooq CSV");
+  const bars = [];
+  for (let i = 1; i < lines.length; i++) {
+    const p = lines[i].split(",");
+    if (p.length < 5) continue;
+    const dateStr = p[0].trim();
+    const o = parseFloat(p[1]);
+    const h = parseFloat(p[2]);
+    const l = parseFloat(p[3]);
+    const c = parseFloat(p[4]);
+    const v = p[5] != null ? parseFloat(p[5]) : 0;
+    if (![o, h, l, c].every((x) => Number.isFinite(x))) continue;
+
+    let t;
+    // Daily: YYYY-MM-DD  |  Intraday: YYYY-MM-DD HH:MM
+    if (dateStr.indexOf(" ") !== -1) {
+      const [ds, ts] = dateStr.split(" ");
+      const [Y, M, D] = ds.split("-").map(Number);
+      const [hh, mm] = (ts || "12:00").split(":").map(Number);
+      t = Date.UTC(Y, M - 1, D, hh || 0, mm || 0, 0) / 1000;
+    } else {
+      const [Y, M, D] = dateStr.split("-").map(Number);
+      if (!Y || !M || !D) continue;
+      t = Date.UTC(Y, M - 1, D, 12, 0, 0) / 1000;
+    }
+    bars.push({
+      time: t,
+      open: o,
+      high: h,
+      low: l,
+      close: c,
+      volume: Number.isFinite(v) ? v : 0,
+    });
+  }
+  if (!bars.length) throw new Error("No Stooq bars parsed");
+  bars.sort((a, b) => a.time - b.time);
+  // dedupe times
+  const out = [];
+  for (let i = 0; i < bars.length; i++) {
+    if (!out.length || out[out.length - 1].time !== bars[i].time) {
+      out.push(bars[i]);
+    } else {
+      out[out.length - 1] = bars[i];
+    }
+  }
+  return out;
+}
+
+function aggregateBars(bars, bucketSec) {
+  if (!bars.length) return bars;
+  const out = [];
+  let cur = null;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const bt = Math.floor(b.time / bucketSec) * bucketSec;
+    if (!cur || cur.time !== bt) {
+      if (cur) out.push(cur);
+      cur = {
+        time: bt,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += b.volume;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+async function fetchStooqOHLCV(symbol, interval) {
+  const code = STOOQ_INTERVAL[interval];
+  if (interval === "1m") {
+    throw new Error("1m stocks not available on free Stooq feed");
+  }
+  const stooqInterval = code || "d";
+  const s = toStooqSymbol(symbol);
+  const direct =
+    "https://stooq.com/q/d/l/?s=" + encodeURIComponent(s) + "&i=" + stooqInterval;
+  const text = await firstOk(withCorsProxies(direct), false);
+  if (text.indexOf(",") === -1) throw new Error("Stooq returned non-CSV");
+  let bars = parseStooqCsv(text);
+  if (interval === "4h") {
+    bars = aggregateBars(bars, 4 * 3600);
+  }
+  return bars;
+}
+
+const YAHOO_MAP = {
   "1m": { interval: "1m", range: "7d" },
   "5m": { interval: "5m", range: "1mo" },
   "15m": { interval: "15m", range: "1mo" },
@@ -93,47 +240,24 @@ const YAHOO_INTERVAL = {
   "1w": { interval: "1wk", range: "10y" },
 };
 
-async function fetchText(url) {
-  const res = await fetch(url, { headers: { Accept: "*/*" } });
-  if (!res.ok) throw new Error("HTTP " + res.status + " for " + url.slice(0, 60));
-  return res.text();
-}
-
-async function fetchJsonAny(url) {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return res.json();
-}
-
-/** Try URL list until one returns usable text/json */
-async function firstOk(urls, asJson) {
-  var lastErr = null;
-  for (var i = 0; i < urls.length; i++) {
-    try {
-      if (asJson) return await fetchJsonAny(urls[i]);
-      return await fetchText(urls[i]);
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("All fetch attempts failed");
-}
-
 function parseYahooChart(data) {
-  var result = data && data.chart && data.chart.result && data.chart.result[0];
+  const result = data && data.chart && data.chart.result && data.chart.result[0];
   if (!result) throw new Error("No Yahoo chart.result");
-  var quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
-  var ts = result.timestamp || [];
-  var opens = quote.open || [];
-  var highs = quote.high || [];
-  var lows = quote.low || [];
-  var closes = quote.close || [];
-  var vols = quote.volume || [];
-  var bars = [];
-  for (var i = 0; i < ts.length; i++) {
-    var o = opens[i], h = highs[i], l = lows[i], c = closes[i];
+  const quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
+  const ts = result.timestamp || [];
+  const opens = quote.open || [];
+  const highs = quote.high || [];
+  const lows = quote.low || [];
+  const closes = quote.close || [];
+  const vols = quote.volume || [];
+  const bars = [];
+  for (let i = 0; i < ts.length; i++) {
+    const o = opens[i];
+    const h = highs[i];
+    const l = lows[i];
+    const c = closes[i];
     if (o == null || h == null || l == null || c == null) continue;
-    if (![o, h, l, c].every(function (x) { return Number.isFinite(x); })) continue;
+    if (![o, h, l, c].every((x) => Number.isFinite(x))) continue;
     bars.push({
       time: ts[i],
       open: o,
@@ -147,120 +271,62 @@ function parseYahooChart(data) {
   return bars;
 }
 
-function yahooChartUrls(symbol, interval) {
-  var map = YAHOO_INTERVAL[interval] || YAHOO_INTERVAL["1d"];
-  var direct =
+async function fetchYahooOHLCV(symbol, interval) {
+  const map = YAHOO_MAP[interval] || YAHOO_MAP["1d"];
+  const path =
     "https://query1.finance.yahoo.com/v8/finance/chart/" +
     encodeURIComponent(symbol) +
-    "?interval=" + map.interval +
-    "&range=" + map.range +
-    "&includePrePost=false&events=div%7Csplit";
-  var direct2 = direct.replace("query1.", "query2.");
-  return [
-    direct,
-    direct2,
-    // Free CORS relays (no API key)
-    "https://corsproxy.io/?" + encodeURIComponent(direct),
-    "https://api.allorigins.win/raw?url=" + encodeURIComponent(direct),
-    "https://corsproxy.io/?" + encodeURIComponent(direct2),
-  ];
-}
-
-async function fetchYahooOHLCV(symbol, interval) {
-  var urls = yahooChartUrls(symbol, interval);
-  var lastErr = null;
-  for (var i = 0; i < urls.length; i++) {
+    "?interval=" +
+    map.interval +
+    "&range=" +
+    map.range +
+    "&includePrePost=false";
+  const path2 = path.replace("query1.", "query2.");
+  const urls = withCorsProxies(path).concat(withCorsProxies(path2));
+  let lastErr = null;
+  for (let i = 0; i < urls.length; i++) {
     try {
-      var data = await fetchJsonAny(urls[i]);
-      // allorigins sometimes wraps - handle if needed
-      if (data && data.contents && typeof data.contents === "string") {
+      let data = await fetchJson(urls[i]);
+      if (data && typeof data.contents === "string") {
         data = JSON.parse(data.contents);
       }
-      return parseYahooChart(data);
+      let bars = parseYahooChart(data);
+      if (interval === "4h") bars = aggregateBars(bars, 4 * 3600);
+      return bars;
     } catch (e) {
       lastErr = e;
     }
   }
-  throw lastErr || new Error("Yahoo failed for " + symbol);
+  throw lastErr || new Error("Yahoo failed");
 }
-
-/** Stooq daily CSV fallback - good for 1d stocks, free */
-function toStooqSymbol(symbol) {
-  var s = String(symbol).toLowerCase().replace(/\./g, "-");
-  // US default
-  if (s.indexOf(".") === -1) s = s + ".us";
-  return s;
-}
-
-function parseStooqCsv(text) {
-  var lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) throw new Error("Empty Stooq CSV");
-  var bars = [];
-  // Date,Open,High,Low,Close,Volume  (newest or oldest first - handle both)
-  for (var i = 1; i < lines.length; i++) {
-    var p = lines[i].split(",");
-    if (p.length < 5) continue;
-    var dateStr = p[0].trim();
-    var o = parseFloat(p[1]);
-    var h = parseFloat(p[2]);
-    var l = parseFloat(p[3]);
-    var c = parseFloat(p[4]);
-    var v = p[5] != null ? parseFloat(p[5]) : 0;
-    if (![o, h, l, c].every(function (x) { return Number.isFinite(x); })) continue;
-    // date YYYY-MM-DD -> unix sec UTC noon
-    var parts = dateStr.split("-");
-    if (parts.length !== 3) continue;
-    var t = Date.UTC(+parts[0], +parts[1] - 1, +parts[2], 12, 0, 0) / 1000;
-    bars.push({ time: t, open: o, high: h, low: l, close: c, volume: Number.isFinite(v) ? v : 0 });
-  }
-  if (!bars.length) throw new Error("No Stooq bars parsed");
-  bars.sort(function (a, b) { return a.time - b.time; });
-  return bars;
-}
-
-async function fetchStooqDaily(symbol) {
-  var s = toStooqSymbol(symbol);
-  var direct = "https://stooq.com/q/d/l/?s=" + encodeURIComponent(s) + "&i=d";
-  var urls = [
-    direct,
-    "https://corsproxy.io/?" + encodeURIComponent(direct),
-    "https://api.allorigins.win/raw?url=" + encodeURIComponent(direct),
-  ];
-  var text = await firstOk(urls, false);
-  // allorigins might return HTML error pages
-  if (text.indexOf("Date") === -1 && text.indexOf("date") === -1) {
-    throw new Error("Stooq response not CSV");
-  }
-  return parseStooqCsv(text);
-}
-
 
 export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
   if (assetKind(symbol) === "stock") {
-    var errors = [];
+    const errors = [];
+    // Prefer Stooq for stocks (more TF options, fewer 403s than Yahoo in browser)
     try {
-      var yBars = await fetchYahooOHLCV(symbol, interval);
-      return { bars: yBars, source: "yahoo" };
+      const bars = await fetchStooqOHLCV(symbol, interval);
+      return { bars, source: "stooq" };
     } catch (e) {
-      errors.push("Yahoo: " + (e && e.message ? e.message : e));
+      errors.push("Stooq: " + (e && e.message ? e.message : String(e)));
     }
-    // Daily (and weekly as daily) Stooq fallback
-    if (interval === "1d" || interval === "1w" || interval === "4h" || interval === "1h") {
-      try {
-        var sBars = await fetchStooqDaily(symbol);
-        if (interval === "1w" && sBars.length > 5) {
-          // crude weekly: take every 5th daily bar endpoints - better: aggregate
-          sBars = aggregateWeekly(sBars);
-        }
-        return { bars: sBars, source: "stooq" };
-      } catch (e2) {
-        errors.push("Stooq: " + (e2 && e2.message ? e2.message : e2));
-      }
+    try {
+      const bars = await fetchYahooOHLCV(symbol, interval);
+      return { bars, source: "yahoo" };
+    } catch (e) {
+      errors.push("Yahoo: " + (e && e.message ? e.message : String(e)));
     }
     throw new Error(
-      "Stock fetch failed for " + symbol + ". " + errors.join(" | ")
+      "Stock fetch failed for " +
+        symbol +
+        " @ " +
+        interval +
+        ". " +
+        errors.join(" | ") +
+        (interval === "1m" ? " Tip: use 5m or 1D for stocks." : "")
     );
   }
+
   try {
     const bars = await fetchCoinbaseOHLCV(symbol, interval, 300);
     return { bars, source: "coinbase" };
@@ -268,31 +334,6 @@ export async function fetchOHLCV(symbol, interval = "1d", limit = 500) {
     const bars = await fetchBinanceOHLCV(symbol, interval, limit);
     return { bars, source: "binance" };
   }
-}
-
-function aggregateWeekly(dailyBars) {
-  if (!dailyBars.length) return dailyBars;
-  var out = [];
-  var cur = null;
-  for (var i = 0; i < dailyBars.length; i++) {
-    var b = dailyBars[i];
-    var d = new Date(b.time * 1000);
-    // ISO week start Monday
-    var day = d.getUTCDay();
-    var weekStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((day + 6) % 7), 12, 0, 0));
-    var wt = weekStart.getTime() / 1000;
-    if (!cur || cur.time !== wt) {
-      if (cur) out.push(cur);
-      cur = { time: wt, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume };
-    } else {
-      cur.high = Math.max(cur.high, b.high);
-      cur.low = Math.min(cur.low, b.low);
-      cur.close = b.close;
-      cur.volume += b.volume;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
 }
 
 export function sma(bars, period) {

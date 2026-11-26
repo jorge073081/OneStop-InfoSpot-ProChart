@@ -3,7 +3,7 @@ import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 import { sma, ema, rsi, bollinger, macd, stoch, atr, vwap } from "../lib/ohlcv.js";
 
 const VIEWPORT_KEY = "chart_desk_viewport";
-const FUTURE_BARS = 150;
+const FUTURE_SLOTS = 150;
 
 const COLORS = {
   bg: "#12161c",
@@ -23,6 +23,28 @@ const COLORS = {
   histDown: "rgba(239,68,68,0.5)",
   draw: "#22d3ee",
 };
+
+function getBarStep(bars) {
+  if (!bars || bars.length < 2) return 86400;
+  return bars[bars.length - 1].time - bars[bars.length - 2].time || 86400;
+}
+
+function buildPaddedCandles(bars) {
+  const real = bars.map(({ time, open, high, low, close }) => ({
+    time,
+    open,
+    high,
+    low,
+    close,
+  }));
+  if (real.length < 2) return real;
+  const lastTime = real[real.length - 1].time;
+  const step = getBarStep(bars);
+  for (let i = 1; i <= FUTURE_SLOTS; i++) {
+    real.push({ time: lastTime + i * step });
+  }
+  return real;
+}
 
 export default function CandleChart({
   bars,
@@ -84,6 +106,7 @@ export default function CandleChart({
   const drawingsRef = useRef(drawings);
   const onAddRef = useRef(onAddDrawing);
   const onDraftRef = useRef(onTrendDraft);
+  const isRestoringRef = useRef(false);
 
   useEffect(() => {
     barsRef.current = bars;
@@ -104,60 +127,49 @@ export default function CandleChart({
     onDraftRef.current = onTrendDraft;
   }, [onTrendDraft]);
 
-  function getStepSeconds(list) {
-    if (!list || list.length < 2) return 86400;
-    const diff = list[list.length - 1].time - list[list.length - 2].time;
-    return diff > 0 ? diff : 86400;
-  }
-
-  function buildPaddedCandles(list) {
-    if (!list || list.length === 0) return [];
-    const step = getStepSeconds(list);
-    const lastTime = list[list.length - 1].time;
-    const padded = list.map(({ time, open, high, low, close }) => ({
-      time,
-      open,
-      high,
-      low,
-      close,
-    }));
-    for (let i = 1; i <= FUTURE_BARS; i++) {
-      padded.push({ time: lastTime + i * step });
-    }
-    return padded;
-  }
-
   function snapToValidTime(rawTime) {
     const list = barsRef.current;
-    if (!list || list.length === 0 || rawTime == null) return rawTime;
-    const step = getStepSeconds(list);
+    if (!list || list.length < 2 || rawTime == null) return rawTime;
+    const firstTime = list[0].time;
     const lastTime = list[list.length - 1].time;
-    if (rawTime <= lastTime) return rawTime;
-    const stepsAhead = Math.max(1, Math.min(FUTURE_BARS, Math.round((rawTime - lastTime) / step)));
-    return lastTime + stepsAhead * step;
+    const step = getBarStep(list);
+
+    if (rawTime <= firstTime) return firstTime;
+    if (rawTime <= lastTime) {
+      let best = list[0].time;
+      let bestDiff = Math.abs(rawTime - best);
+      for (let i = 1; i < list.length; i++) {
+        const diff = Math.abs(rawTime - list[i].time);
+        if (diff < bestDiff) {
+          best = list[i].time;
+          bestDiff = diff;
+        }
+      }
+      return best;
+    }
+
+    const offset = Math.max(1, Math.min(FUTURE_SLOTS, Math.round((rawTime - lastTime) / step)));
+    return lastTime + offset * step;
   }
 
   function getClickTime(param, priceChart) {
+    if (param && param.time != null) return snapToValidTime(param.time);
     const list = barsRef.current;
-    if (!list || list.length === 0) return null;
-
-    if (param && param.time != null) {
-      return snapToValidTime(param.time);
-    }
-    if (!param || !param.point) return null;
+    if (!param || !param.point || !list || list.length < 2) return null;
 
     const logical = priceChart.timeScale().coordinateToLogical(param.point.x);
     if (logical == null || !Number.isFinite(logical)) return null;
 
     const idx = Math.round(logical);
     const lastIdx = list.length - 1;
-    const step = getStepSeconds(list);
+    const step = getBarStep(list);
 
     if (idx < 0) return list[0].time;
-    if (idx <= lastIdx) return list[idx].time;
-
-    const stepsAhead = Math.max(1, Math.min(FUTURE_BARS, idx - lastIdx));
-    return list[lastIdx].time + stepsAhead * step;
+    if (idx > lastIdx) {
+      const clampedOffset = Math.min(FUTURE_SLOTS, idx - lastIdx);
+      return list[lastIdx].time + clampedOffset * step;
+    }
+    return list[idx].time;
   }
 
   function applyDrawing(d, s) {
@@ -246,6 +258,9 @@ export default function CandleChart({
         p1 = p2;
         p2 = pp;
       }
+      if (t1 === t2) {
+        t2 = snapToValidTime(t1 + getBarStep(barsRef.current));
+      }
       const spanT = t2 - t1 || 1;
       const slope = (p2 - p1) / spanT;
       let pts;
@@ -254,32 +269,25 @@ export default function CandleChart({
         pts = [
           { time: t1, value: p1 },
           { time: t2, value: p2 },
-          { time: t3, value: p1 + slope * (t3 - t1) },
+          ...(t3 > t2 ? [{ time: t3, value: p1 + slope * (t3 - t1) }] : []),
         ];
       } else if (d.type === "extend") {
-        const t0 = t1 - spanT * 3;
+        const t0 = snapToValidTime(t1 - spanT * 3);
         const t3 = snapToValidTime(t2 + spanT * 3);
         pts = [
-          { time: t0, value: p1 + slope * (t0 - t1) },
+          ...(t0 < t1 ? [{ time: t0, value: p1 + slope * (t0 - t1) }] : []),
           { time: t1, value: p1 },
           { time: t2, value: p2 },
-          { time: t3, value: p1 + slope * (t3 - t1) },
-        ].sort((a, b) => a.time - b.time);
+          ...(t3 > t2 ? [{ time: t3, value: p1 + slope * (t3 - t1) }] : []),
+        ];
       } else {
         pts = [
           { time: t1, value: p1 },
           { time: t2, value: p2 },
         ];
       }
-      // Deduplicate timestamps in ascending order
-      const cleanPts = [];
-      pts.forEach((pt) => {
-        if (!cleanPts.length || pt.time > cleanPts[cleanPts.length - 1].time) {
-          cleanPts.push(pt);
-        }
-      });
       try {
-        series.setData(cleanPts);
+        series.setData(pts);
       } catch (_) {}
       s.trendSeries.push({ id: d.id, series });
       return;
@@ -289,8 +297,11 @@ export default function CandleChart({
       if (s.trendSeries.some((x) => x.id === d.id)) return;
       const hi = Math.max(d.p1, d.p2);
       const lo = Math.min(d.p1, d.p2);
-      const tA = snapToValidTime(Math.min(d.t1, d.t2));
-      const tB = snapToValidTime(Math.max(d.t1, d.t2));
+      let tA = snapToValidTime(Math.min(d.t1, d.t2));
+      let tB = snapToValidTime(Math.max(d.t1, d.t2));
+      if (tA === tB) {
+        tB = snapToValidTime(tA + getBarStep(barsRef.current));
+      }
       const top = s.priceChart.addLineSeries({
         color: "rgba(34,211,238,0.9)",
         lineWidth: 1,
@@ -303,7 +314,7 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      if (tB > tA) {
+      try {
         top.setData([
           { time: tA, value: hi },
           { time: tB, value: hi },
@@ -312,7 +323,7 @@ export default function CandleChart({
           { time: tA, value: lo },
           { time: tB, value: lo },
         ]);
-      }
+      } catch (_) {}
       const pl1 = s.candle.createPriceLine({
         price: hi,
         color: "rgba(34,211,238,0.45)",
@@ -365,10 +376,11 @@ export default function CandleChart({
       if (s.trendSeries.some((x) => x.id === d.id)) return;
       const t1 = snapToValidTime(d.t1);
       const p1 = d.p1;
-      const t2 = snapToValidTime(d.t2);
+      let t2 = snapToValidTime(d.t2);
       const p2 = d.p2;
       const t3 = snapToValidTime(d.t3);
       const p3 = d.p3;
+      if (t1 === t2) t2 = snapToValidTime(t1 + getBarStep(barsRef.current));
       const spanT = t2 - t1 || 1;
       const slope = (p2 - p1) / spanT;
       const expected = p1 + slope * (t3 - t1);
@@ -387,11 +399,13 @@ export default function CandleChart({
       });
       const tA = Math.min(t1, t2, t3);
       const tB = Math.max(t1, t2, t3);
-      const tPad = Math.max(1, Math.floor((tB - tA) * 0.15) || 1);
-      const raw = [tA - tPad, t1, t2, t3, snapToValidTime(tB + tPad)];
-      const ts = raw.filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
-      base.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) })));
-      par.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) + offset })));
+      const tPad = Math.max(getBarStep(barsRef.current), Math.floor((tB - tA) * 0.15));
+      const raw = [snapToValidTime(tA - tPad), t1, t2, t3, snapToValidTime(tB + tPad)];
+      const ts = raw.filter((v, i, a) => v != null && a.indexOf(v) === i).sort((a, b) => a - b);
+      try {
+        base.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) })));
+        par.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) + offset })));
+      } catch (_) {}
       s.trendSeries.push({ id: d.id, series: base, extra: par });
       return;
     }
@@ -406,15 +420,16 @@ export default function CandleChart({
         priceLineVisible: false,
       });
       const t1 = snapToValidTime(d.t1);
-      const t2 = snapToValidTime(d.t2);
+      let t2 = snapToValidTime(d.t2);
+      if (t1 === t2) t2 = snapToValidTime(t1 + getBarStep(barsRef.current));
       const tA = Math.min(t1, t2);
       const tB = Math.max(t1, t2);
-      if (tB > tA) {
+      try {
         series.setData([
           { time: tA, value: t1 <= t2 ? d.p1 : d.p2 },
           { time: tB, value: t1 <= t2 ? d.p2 : d.p1 },
         ]);
-      }
+      } catch (_) {}
       const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
       s._posMarkers = s._posMarkers || [];
       s._posMarkers.push({
@@ -455,20 +470,21 @@ export default function CandleChart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 25,
+        rightOffset: 10,
       },
       width: container.clientWidth,
       height: container.clientHeight,
     });
 
     const saveViewport = (range) => {
+      if (isRestoringRef.current) return;
       if (range && range.from != null && range.to != null) {
         try {
           localStorage.setItem(VIEWPORT_KEY, JSON.stringify(range));
         } catch (_) {}
       }
     };
-    priceChart.timeScale().subscribeVisibleTimeRangeChange(saveViewport);
+    priceChart.timeScale().subscribeVisibleLogicalRangeChange(saveViewport);
 
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: COLORS.up,
@@ -695,23 +711,15 @@ export default function CandleChart({
 
     priceChart.subscribeClick(clickHandler);
 
-    const fitActualBars = () => {
-      const list = barsRef.current;
-      if (list && list.length > 0) {
-        priceChart.timeScale().setVisibleLogicalRange({
-          from: 0,
-          to: list.length - 1 + 25,
-        });
-      } else {
-        priceChart.timeScale().fitContent();
-      }
-    };
-
-    // Double-click -> clear saved zoom & fit actual candles + 25 future slots
+    // Double-click -> reset saved zoom & frame candles + 20 future bar slots
     const dblHandler = () => {
       try {
         localStorage.removeItem(VIEWPORT_KEY);
-        fitActualBars();
+        const totalBars = barsRef.current?.length || 100;
+        priceChart.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, totalBars - 120),
+          to: totalBars + 20,
+        });
         priceChart.priceScale("right").applyOptions({ autoScale: true });
       } catch (_) {}
     };
@@ -751,9 +759,6 @@ export default function CandleChart({
       _posMarkers: [],
     };
     seriesRef.current = s;
-
-    // re-apply drawings after chart recreate
-    (drawingsRef.current || []).forEach((d) => applyDrawing(d, s));
 
     const onResize = () => {
       if (priceRef.current) {
@@ -797,7 +802,7 @@ export default function CandleChart({
       window.removeEventListener("resize", onResize);
       container.removeEventListener("dblclick", dblHandler);
       try {
-        priceChart.timeScale().unsubscribeVisibleTimeRangeChange(saveViewport);
+        priceChart.timeScale().unsubscribeVisibleLogicalRangeChange(saveViewport);
       } catch (_) {}
       try {
         priceChart.unsubscribeClick(clickHandler);
@@ -839,7 +844,7 @@ export default function CandleChart({
   // Sync drawings list
   useEffect(() => {
     const s = seriesRef.current;
-    if (!s.candle) return;
+    if (!s.candle || !bars || bars.length === 0) return;
 
     const live = drawings.map((d) => d.id);
     const keepPrice = (id) => live.some((lid) => id === lid || String(id).startsWith(lid + "-"));
@@ -863,7 +868,6 @@ export default function CandleChart({
       return false;
     });
 
-    // rebuild markers from drawings
     s._vlineMarkers = [];
     s._posMarkers = [];
     drawings.forEach((d) => {
@@ -912,7 +916,7 @@ export default function CandleChart({
     } catch (_) {}
 
     drawings.forEach((d) => applyDrawing(d, s));
-  }, [drawings]);
+  }, [drawings, bars]);
 
   // Bars / live updates
   useEffect(() => {
@@ -925,9 +929,8 @@ export default function CandleChart({
       String(first.time) + "_" + String(second ? second.time : 0) + "_" + String(first.open);
 
     if (s.datasetKey !== currentKey) {
-      // Pad candlestick series with future whitespace bars so timeScale natively indexes future timestamps
+      isRestoringRef.current = true;
       s.candle.setData(buildPaddedCandles(bars));
-
       s.volume.setData(
         bars.map((b) => ({
           time: b.time,
@@ -967,14 +970,14 @@ export default function CandleChart({
         );
       }
 
-      // Restore saved zoom/pan instead of zooming out to all 150 empty future bars
+      // Restore saved zoom/pan or frame candles + 20 future slots
       let restored = false;
       try {
         const saved = localStorage.getItem(VIEWPORT_KEY);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && parsed.from != null && parsed.to != null) {
-            s.priceChart.timeScale().setVisibleRange(parsed);
+            s.priceChart.timeScale().setVisibleLogicalRange(parsed);
             restored = true;
           }
         }
@@ -982,74 +985,80 @@ export default function CandleChart({
 
       if (!restored) {
         s.priceChart.timeScale().setVisibleLogicalRange({
-          from: 0,
-          to: bars.length - 1 + 25,
+          from: Math.max(0, bars.length - 120),
+          to: bars.length + 20,
         });
       }
 
       s.datasetKey = currentKey;
+      setTimeout(() => {
+        isRestoringRef.current = false;
+      }, 50);
+
+      // Re-apply drawings now that padded candles exist
+      (drawingsRef.current || []).forEach((d) => applyDrawing(d, s));
     } else {
+      // Safe live update that preserves trailing future whitespace slots
+      s.candle.setData(buildPaddedCandles(bars));
+
       const last = bars[bars.length - 1];
-      s.candle.update({
-        time: last.time,
-        open: last.open,
-        high: last.high,
-        low: last.low,
-        close: last.close,
-      });
-      s.volume.update({
-        time: last.time,
-        value: last.volume,
-        color: last.close >= last.open ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)",
-      });
+      try {
+        s.volume.update({
+          time: last.time,
+          value: last.volume,
+          color: last.close >= last.open ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)",
+        });
+      } catch (_) {}
       if (s.sma50) {
         const d = sma(bars, 50);
-        if (d.length) s.sma50.update(d[d.length - 1]);
+        if (d.length) try { s.sma50.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.sma200) {
         const d = sma(bars, 200);
-        if (d.length) s.sma200.update(d[d.length - 1]);
+        if (d.length) try { s.sma200.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.ema9) {
         const d = ema(bars, 9);
-        if (d.length) s.ema9.update(d[d.length - 1]);
+        if (d.length) try { s.ema9.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.ema21) {
         const d = ema(bars, 21);
-        if (d.length) s.ema21.update(d[d.length - 1]);
+        if (d.length) try { s.ema21.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.ema50) {
         const d = ema(bars, 50);
-        if (d.length) s.ema50.update(d[d.length - 1]);
+        if (d.length) try { s.ema50.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.vwap) {
         const d = vwap(bars);
-        if (d.length) s.vwap.update(d[d.length - 1]);
+        if (d.length) try { s.vwap.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.stochK) {
         const st = stoch(bars, 14, 3);
-        if (st.k.length) s.stochK.update(st.k[st.k.length - 1]);
-        if (st.d.length) s.stochD.update(st.d[st.d.length - 1]);
+        if (st.k.length) try { s.stochK.update(st.k[st.k.length - 1]); } catch (_) {}
+        if (st.d.length) try { s.stochD.update(st.d[st.d.length - 1]); } catch (_) {}
       }
       if (s.atr) {
         const d = atr(bars, 14);
-        if (d.length) s.atr.update(d[d.length - 1]);
+        if (d.length) try { s.atr.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.rsi) {
         const d = rsi(bars, 14);
-        if (d.length) s.rsi.update(d[d.length - 1]);
+        if (d.length) try { s.rsi.update(d[d.length - 1]); } catch (_) {}
       }
       if (s.macdLine) {
         const m = macd(bars);
-        if (m.macdLine.length) s.macdLine.update(m.macdLine[m.macdLine.length - 1]);
-        if (m.signalLine.length) s.macdSignal.update(m.signalLine[m.signalLine.length - 1]);
+        if (m.macdLine.length) try { s.macdLine.update(m.macdLine[m.macdLine.length - 1]); } catch (_) {}
+        if (m.signalLine.length) try { s.macdSignal.update(m.signalLine[m.signalLine.length - 1]); } catch (_) {}
         if (m.hist.length) {
           const h = m.hist[m.hist.length - 1];
-          s.macdHist.update({
-            time: h.time,
-            value: h.value,
-            color: h.value >= 0 ? COLORS.histUp : COLORS.histDown,
-          });
+          try {
+            s.macdHist.update({
+              time: h.time,
+              value: h.value,
+              color: h.value >= 0 ? COLORS.histUp : COLORS.histDown,
+            });
+          } catch (_) {}
         }
       }
     }

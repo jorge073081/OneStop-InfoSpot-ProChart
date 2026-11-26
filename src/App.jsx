@@ -316,11 +316,16 @@ export default function App() {
 
   // Multi-TF alignment badge (15m / 1H / 4H). Independent of main chart bars.
   // Failures never clear the chart — only update the badge.
+  // Refreshes on symbol change and every 3 minutes while the tab is open.
   useEffect(() => {
     let cancelled = false;
-    setAlignInfo({ label: "TF …", title: "Loading 15m / 1H / 4H bias", tone: "muted" });
+    let timer = null;
 
-    (async () => {
+    const run = async (isInitial) => {
+      if (cancelled) return;
+      if (isInitial) {
+        setAlignInfo({ label: "TF …", title: "Loading 15m / 1H / 4H bias", tone: "muted" });
+      }
       try {
         const [r15, r1h, r4h] = await Promise.all([
           fetchOHLCV(symbol, "15m", 80).catch(() => null),
@@ -333,14 +338,21 @@ export default function App() {
         const b4h = r4h && r4h.bars ? tfBias(r4h.bars) : null;
         setAlignInfo(alignmentSummary(b15, b1h, b4h));
       } catch (_) {
-        if (!cancelled) {
+        if (!cancelled && isInitial) {
           setAlignInfo({ label: "TF —", title: "Alignment unavailable", tone: "muted" });
         }
+        // On background refresh failure: keep the last good badge (no flicker / no chart touch)
       }
-    })();
+    };
+
+    run(true);
+    timer = setInterval(() => {
+      run(false);
+    }, 3 * 60 * 1000);
 
     return () => {
       cancelled = true;
+      if (timer) clearInterval(timer);
     };
   }, [symbol]);
 

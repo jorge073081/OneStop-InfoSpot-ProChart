@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CandleChart from "./components/CandleChart.jsx";
-import { fetchOHLCV, toCoinbaseProduct, ema } from "./lib/ohlcv.js";
+import { fetchOHLCV, toCoinbaseProduct } from "./lib/ohlcv.js";
 import { INTERVALS, displaySymbol, normalizeSymbol } from "./lib/symbols.js";
 
 const INTERVAL_SECONDS = {
@@ -27,20 +27,6 @@ function writeParams(symbol, interval) {
   q.set("interval", interval);
   const url = `${window.location.pathname}?${q.toString()}`;
   window.history.replaceState({}, "", url);
-}
-
-// Compute bullish/bearish direction from EMA 21 vs EMA 50 + price position
-function getTrendDirection(bars) {
-  if (!bars || bars.length < 55) return "neutral";
-  const e21 = ema(bars, 21);
-  const e50 = ema(bars, 50);
-  if (!e21.length || !e50.length) return "neutral";
-  const lastClose = bars[bars.length - 1].close;
-  const lastE21 = e21[e21.length - 1].value;
-  const lastE50 = e50[e50.length - 1].value;
-  if (lastClose > lastE21 && lastE21 > lastE50) return "bull";
-  if (lastClose < lastE21 && lastE21 < lastE50) return "bear";
-  return "neutral";
 }
 
 const TOOL_GROUPS = [
@@ -228,13 +214,6 @@ export default function App() {
   const [showStoch, setShowStoch] = useState(false);
   const [showAtr, setShowAtr] = useState(false);
 
-  // Multi-Timeframe Alignment state (4H, 1H, 15M)
-  const [mtfTrend, setMtfTrend] = useState({
-    "4h": "loading",
-    "1h": "loading",
-    "15m": "loading",
-  });
-
   const [drawTool, setDrawTool] = useState("none");
   const [drawings, setDrawings] = useState(() => {
     try {
@@ -251,40 +230,6 @@ export default function App() {
       localStorage.setItem(`chart_desk_drawings_${symbol}`, JSON.stringify(drawings));
     } catch {}
   }, [drawings, symbol]);
-
-  // Check 4H, 1H, and 15M trend alignment whenever symbol changes (and refresh every 60s)
-  useEffect(() => {
-    let cancelled = false;
-
-    const checkMTF = async () => {
-      try {
-        const [res4h, res1h, res15m] = await Promise.all([
-          fetchOHLCV(symbol, "4h", 100).catch(() => null),
-          fetchOHLCV(symbol, "1h", 100).catch(() => null),
-          fetchOHLCV(symbol, "15m", 100).catch(() => null),
-        ]);
-        if (cancelled) return;
-        setMtfTrend({
-          "4h": res4h ? getTrendDirection(res4h.bars) : "neutral",
-          "1h": res1h ? getTrendDirection(res1h.bars) : "neutral",
-          "15m": res15m ? getTrendDirection(res15m.bars) : "neutral",
-        });
-      } catch {
-        if (!cancelled) {
-          setMtfTrend({ "4h": "neutral", "1h": "neutral", "15m": "neutral" });
-        }
-      }
-    };
-
-    setMtfTrend({ "4h": "loading", "1h": "loading", "15m": "loading" });
-    checkMTF();
-    const timer = setInterval(checkMTF, 60000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [symbol]);
 
   const load = useCallback(async (sym, tf) => {
     setStatus("Loading…");
@@ -480,34 +425,6 @@ export default function App() {
   const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
   const chgText = chgPct != null ? chgPct.toFixed(2) : "0.00";
 
-  // Compute overall 4H + 1H + 15M alignment verdict
-  const allBull = mtfTrend["4h"] === "bull" && mtfTrend["1h"] === "bull" && mtfTrend["15m"] === "bull";
-  const allBear = mtfTrend["4h"] === "bear" && mtfTrend["1h"] === "bear" && mtfTrend["15m"] === "bear";
-  const isLoadingMtf = mtfTrend["4h"] === "loading";
-
-  const mtfBorderColor = isLoadingMtf
-    ? "#1e2630"
-    : allBull
-      ? "rgba(34, 197, 94, 0.55)"
-      : allBear
-        ? "rgba(239, 68, 68, 0.55)"
-        : "rgba(234, 179, 8, 0.4)";
-
-  const mtfBgColor = isLoadingMtf
-    ? "#161b22"
-    : allBull
-      ? "rgba(34, 197, 94, 0.12)"
-      : allBear
-        ? "rgba(239, 68, 68, 0.12)"
-        : "rgba(234, 179, 8, 0.08)";
-
-  const renderDir = (dir) => {
-    if (dir === "loading") return <span style={{ color: "#8b9bb4" }}>…</span>;
-    if (dir === "bull") return <span style={{ color: "#22c55e", fontWeight: 700 }}>▲</span>;
-    if (dir === "bear") return <span style={{ color: "#ef4444", fontWeight: 700 }}>▼</span>;
-    return <span style={{ color: "#eab308", fontWeight: 700 }}>—</span>;
-  };
-
   return (
     <div className="app">
       <header className="topbar">
@@ -534,60 +451,6 @@ export default function App() {
               {i.label}
             </button>
           ))}
-        </div>
-
-        {/* Multi-Timeframe Alignment Badge (4H + 1H + 15M) */}
-        <div
-          title="Multi-Timeframe Trend Alignment (Price vs EMA 21 & EMA 50 across 4H, 1H, and 15M)"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "6px 10px",
-            borderRadius: 8,
-            border: `1px solid ${mtfBorderColor}`,
-            background: mtfBgColor,
-            fontSize: "0.8rem",
-            userSelect: "none",
-          }}
-        >
-          <span
-            style={{
-              fontWeight: 700,
-              color: isLoadingMtf ? "#8b9bb4" : allBull ? "#22c55e" : allBear ? "#ef4444" : "#eab308",
-              letterSpacing: "0.02em",
-            }}
-          >
-            {isLoadingMtf
-              ? "MTF CHECK…"
-              : allBull
-                ? "ALIGNED LONG"
-                : allBear
-                  ? "ALIGNED SHORT"
-                  : "MIXED MTF"}
-          </span>
-          <span style={{ color: "#8b9bb4", fontSize: "0.75rem" }}>|</span>
-          <button
-            type="button"
-            onClick={() => setInterval("4h")}
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#e8eef7", fontSize: "0.78rem" }}
-          >
-            4H {renderDir(mtfTrend["4h"])}
-          </button>
-          <button
-            type="button"
-            onClick={() => setInterval("1h")}
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#e8eef7", fontSize: "0.78rem" }}
-          >
-            1H {renderDir(mtfTrend["1h"])}
-          </button>
-          <button
-            type="button"
-            onClick={() => setInterval("15m")}
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#e8eef7", fontSize: "0.78rem" }}
-          >
-            15M {renderDir(mtfTrend["15m"])}
-          </button>
         </div>
 
         <div className="intervals">
@@ -662,6 +525,8 @@ export default function App() {
             </div>
           ))}
 
+          <div className="draw-divider" />
+
           <button
             type="button"
             title="Clear All Drawings"
@@ -721,7 +586,7 @@ export default function App() {
                   textDecoration: "underline",
                 }}
               >
-                Esc / Done
+                Done
               </button>
             </div>
           ) : null}

@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 import { sma, ema, rsi, bollinger, macd, stoch, atr, vwap } from "../lib/ohlcv.js";
 
+const VIEWPORT_KEY = "chart_desk_viewport";
+
 const COLORS = {
   bg: "#12161c",
   text: "#8b9bb4",
@@ -80,6 +82,7 @@ export default function CandleChart({
   const drawingsRef = useRef(drawings);
   const onAddRef = useRef(onAddDrawing);
   const onDraftRef = useRef(onTrendDraft);
+  const isRestoringRef = useRef(false);
 
   useEffect(() => {
     toolRef.current = drawTool;
@@ -358,9 +361,10 @@ export default function CandleChart({
 
   // Create charts once when indicator layout changes
   useEffect(() => {
-    if (!priceRef.current) return;
+    const container = priceRef.current;
+    if (!container) return;
 
-    const priceChart = createChart(priceRef.current, {
+    const priceChart = createChart(container, {
       layout: {
         background: { type: ColorType.Solid, color: COLORS.bg },
         textColor: COLORS.text,
@@ -373,9 +377,20 @@ export default function CandleChart({
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
-      width: priceRef.current.clientWidth,
-      height: priceRef.current.clientHeight,
+      width: container.clientWidth,
+      height: container.clientHeight,
     });
+
+    // Save pan & zoom whenever user moves the chart
+    const saveViewport = (range) => {
+      if (isRestoringRef.current) return;
+      if (range && range.from != null && range.to != null) {
+        try {
+          localStorage.setItem(VIEWPORT_KEY, JSON.stringify(range));
+        } catch (_) {}
+      }
+    };
+    priceChart.timeScale().subscribeVisibleTimeRangeChange(saveViewport);
 
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: COLORS.up,
@@ -600,17 +615,18 @@ export default function CandleChart({
 
     priceChart.subscribeClick(clickHandler);
 
-    // Double-click → fit content (keeps drawings)
+    // Double-click -> clear saved zoom & fit content (keeps drawings)
     const dblHandler = () => {
       try {
+        localStorage.removeItem(VIEWPORT_KEY);
         priceChart.timeScale().fitContent();
+        priceChart.priceScale("right").applyOptions({ autoScale: true });
       } catch (_) {}
     };
     try {
       priceChart.subscribeDblClick(dblHandler);
-    } catch (_) {
-      // older LWC: no-op
-    }
+    } catch (_) {}
+    container.addEventListener("dblclick", dblHandler);
 
     const s = {
       priceChart,
@@ -683,17 +699,21 @@ export default function CandleChart({
 
     return () => {
       window.removeEventListener("resize", onResize);
+      container.removeEventListener("dblclick", dblHandler);
+      try {
+        priceChart.timeScale().unsubscribeVisibleTimeRangeChange(saveViewport);
+      } catch (_) {}
       try {
         priceChart.unsubscribeClick(clickHandler);
+      } catch (_) {}
+      try {
+        priceChart.unsubscribeDblClick(dblHandler);
       } catch (_) {}
       priceChart.remove();
       if (rsiChart) rsiChart.remove();
       if (macdChart) macdChart.remove();
       if (stochChart) stochChart.remove();
       if (atrChart) atrChart.remove();
-      try {
-        priceChart.unsubscribeDblClick(dblHandler);
-      } catch (_) {}
       seriesRef.current = {
         priceChart: null,
         rsiChart: null,
@@ -807,6 +827,7 @@ export default function CandleChart({
       String(first.time) + "_" + String(second ? second.time : 0) + "_" + String(first.open);
 
     if (s.datasetKey !== currentKey) {
+      isRestoringRef.current = true;
       s.candle.setData(
         bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close }))
       );
@@ -848,8 +869,28 @@ export default function CandleChart({
           }))
         );
       }
-      s.priceChart.timeScale().fitContent();
+
+      // Restore saved zoom/pan instead of resetting to fitContent
+      let restored = false;
+      try {
+        const saved = localStorage.getItem(VIEWPORT_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.from != null && parsed.to != null) {
+            s.priceChart.timeScale().setVisibleRange(parsed);
+            restored = true;
+          }
+        }
+      } catch (_) {}
+
+      if (!restored) {
+        s.priceChart.timeScale().fitContent();
+      }
+
       s.datasetKey = currentKey;
+      setTimeout(() => {
+        isRestoringRef.current = false;
+      }, 50);
     } else {
       const last = bars[bars.length - 1];
       s.candle.update({

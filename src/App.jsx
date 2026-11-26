@@ -249,6 +249,42 @@ export default function App() {
   const [liveState, setLiveState] = useState("Connecting…");
   const [error, setError] = useState("");
   const [alignInfo, setAlignInfo] = useState({ label: "TF —", title: "Multi-TF alignment", tone: "muted" });
+  const [watchlist, setWatchlist] = useState(() => {
+    try {
+      const raw = localStorage.getItem("chart_desk_watchlist");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showWatch, setShowWatch] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("chart_desk_watchlist", JSON.stringify(watchlist));
+    } catch {}
+  }, [watchlist]);
+
+  const addToWatchlist = () => {
+    const sym = symbol;
+    if (!sym) return;
+    setWatchlist((prev) => {
+      if (prev.includes(sym)) return prev;
+      return prev.concat([sym]).slice(-30); // cap 30
+    });
+  };
+
+  const removeFromWatchlist = (sym) => {
+    setWatchlist((prev) => prev.filter((s) => s !== sym));
+  };
+
+  const openWatchSymbol = (sym) => {
+    const next = normalizeSymbol(sym);
+    setSymbol(next);
+    setSymbolInput(displaySymbol(next));
+    setShowWatch(false);
+  };
   const [showIndBox, setShowIndBox] = useState(false);
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
@@ -595,6 +631,72 @@ export default function App() {
             {alignInfo.label}
           </span>
         </div>
+
+        <div className="intervals">
+          <button
+            type="button"
+            className={"interval-btn" + (showWatch ? " active" : "")}
+            onClick={() => setShowWatch((v) => !v)}
+            title="Watchlist"
+          >
+            {showWatch ? "Hide list" : "Watchlist"}
+          </button>
+          <button
+            type="button"
+            className="interval-btn"
+            onClick={addToWatchlist}
+            title={"Add " + displaySymbol(symbol) + " to watchlist"}
+          >
+            + {displaySymbol(symbol)}
+          </button>
+        </div>
+
+        {showWatch ? (
+          <div
+            className="intervals"
+            style={{
+              flexWrap: "wrap",
+              maxWidth: 560,
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {watchlist.length === 0 ? (
+              <span className="hint">Empty — click + to save the current ticker</span>
+            ) : (
+              watchlist.map((sym) => (
+                <span
+                  key={sym}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    marginRight: 4,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={
+                      "interval-btn" + (symbol === sym ? " active" : "")
+                    }
+                    onClick={() => openWatchSymbol(sym)}
+                  >
+                    {displaySymbol(sym)}
+                  </button>
+                  <button
+                    type="button"
+                    className="interval-btn"
+                    title="Remove"
+                    onClick={() => removeFromWatchlist(sym)}
+                    style={{ padding: "0 6px", opacity: 0.75 }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+        ) : null}
 
         {showIndBox ? (
           <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 560 }}>

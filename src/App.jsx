@@ -586,14 +586,87 @@ export default function App() {
           ))}
         </div>
 
-        <div className="intervals">
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
-            className={`interval-btn${showIndBox ? " active" : ""}`}
-            onClick={() => setShowIndBox((v) => !v)}
+            className={"interval-btn" + (showIndBox ? " active" : "")}
+            onClick={() => {
+              setShowIndBox((v) => !v);
+              if (!showIndBox) setShowWatch(false);
+            }}
+            title="Indicators"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
           >
-            {showIndBox ? "Hide indicators" : "Indicators"}
+            Indicators
           </button>
+          {showIndBox ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                zIndex: 80,
+                width: 168,
+                maxHeight: 280,
+                overflowY: "auto",
+                padding: "6px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 6px 6px",
+                }}
+              >
+                Indicators
+              </div>
+              {[
+                ["SMA 50", showSma50, setShowSma50],
+                ["SMA 200", showSma200, setShowSma200],
+                ["EMA 9", showEma9, setShowEma9],
+                ["EMA 21", showEma21, setShowEma21],
+                ["EMA 50", showEma50, setShowEma50],
+                ["BB", showBb, setShowBb],
+                ["VWAP", showVwap, setShowVwap],
+                ["RSI", showRsi, setShowRsi],
+                ["MACD", showMacd, setShowMacd],
+                ["Stoch", showStoch, setShowStoch],
+                ["ATR", showAtr, setShowAtr],
+              ].map(([label, val, set]) => (
+                <label
+                  key={label}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "5px 8px",
+                    marginBottom: 2,
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: "0.72rem",
+                    color: val ? "#22d3ee" : "#c5d0e0",
+                    fontWeight: val ? 600 : 500,
+                    background: val ? "rgba(34, 211, 238, 0.12)" : "transparent",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={val}
+                    onChange={(e) => set(e.target.checked)}
+                    style={{ accentColor: "#22d3ee", margin: 0 }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         
@@ -636,7 +709,10 @@ export default function App() {
           <button
             type="button"
             className={"interval-btn" + (showWatch ? " active" : "")}
-            onClick={() => setShowWatch((v) => !v)}
+            onClick={() => {
+              setShowWatch((v) => !v);
+              if (!showWatch) setShowIndBox(false);
+            }}
             title="Watchlist"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}
           >
@@ -744,27 +820,6 @@ export default function App() {
         </div>
 
 
-        {showIndBox ? (
-          <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 560 }}>
-            {[
-              ["SMA 50", showSma50, setShowSma50],
-              ["SMA 200", showSma200, setShowSma200],
-              ["EMA 9", showEma9, setShowEma9],
-              ["EMA 21", showEma21, setShowEma21],
-              ["EMA 50", showEma50, setShowEma50],
-              ["BB", showBb, setShowBb],
-              ["VWAP", showVwap, setShowVwap],
-              ["RSI", showRsi, setShowRsi],
-              ["MACD", showMacd, setShowMacd],
-              ["Stoch", showStoch, setShowStoch],
-              ["ATR", showAtr, setShowAtr],
-            ].map(([label, val, set]) => (
-              <label key={label} className="hint" style={{ marginRight: 6 }}>
-                <input type="checkbox" checked={val} onChange={(e) => set(e.target.checked)} /> {label}
-              </label>
-            ))}
-          </div>
-        ) : null}
 
         <div className="meta">
           {last ? (

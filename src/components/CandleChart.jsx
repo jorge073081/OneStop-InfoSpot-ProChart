@@ -82,6 +82,7 @@ export default function CandleChart({
   const drawingsRef = useRef(drawings);
   const onAddRef = useRef(onAddDrawing);
   const onDraftRef = useRef(onTrendDraft);
+  const barsRef = useRef(bars);
   const isRestoringRef = useRef(false);
 
   useEffect(() => {
@@ -99,6 +100,72 @@ export default function CandleChart({
   useEffect(() => {
     onDraftRef.current = onTrendDraft;
   }, [onTrendDraft]);
+  useEffect(() => {
+    barsRef.current = bars;
+  }, [bars]);
+
+  function getClickTime(param, priceChart) {
+    if (param && param.time != null) return param.time;
+    const currentBars = barsRef.current;
+    if (!param || !param.point || !priceChart || !currentBars || currentBars.length < 2) {
+      return null;
+    }
+    const logical = priceChart.timeScale().coordinateToLogical(param.point.x);
+    if (logical == null || !Number.isFinite(logical)) return null;
+
+    const firstTime = currentBars[0].time;
+    const lastIdx = currentBars.length - 1;
+    const lastTime = currentBars[lastIdx].time;
+
+    if (typeof firstTime === "number" && typeof lastTime === "number") {
+      const step = currentBars[lastIdx].time - currentBars[lastIdx - 1].time || 86400;
+      const idx = Math.round(logical);
+      if (idx >= 0 && idx <= lastIdx) return currentBars[idx].time;
+      if (idx > lastIdx) return lastTime + (idx - lastIdx) * step;
+      return firstTime + idx * step;
+    }
+
+    if (typeof firstTime === "string" && typeof lastTime === "string") {
+      const idx = Math.round(logical);
+      if (idx >= 0 && idx <= lastIdx) return currentBars[idx].time;
+      const d1 = new Date(currentBars[lastIdx - 1].time + "T00:00:00Z").getTime();
+      const d2 = new Date(lastTime + "T00:00:00Z").getTime();
+      const stepMs = d2 - d1 || 86400000;
+      const baseMs = idx > lastIdx ? d2 + (idx - lastIdx) * stepMs : new Date(firstTime + "T00:00:00Z").getTime() + idx * stepMs;
+      return new Date(baseMs).toISOString().slice(0, 10);
+    }
+
+    return null;
+  }
+
+  function compareTime(a, b) {
+    if (a === b) return 0;
+    return a > b ? 1 : -1;
+  }
+
+  function addTimeStep(t, steps, refSpan) {
+    if (typeof t === "number") {
+      return t + steps;
+    }
+    if (typeof t === "string") {
+      const base = new Date(t + "T00:00:00Z").getTime();
+      const ms = (refSpan || 86400000) * steps;
+      return new Date(base + ms).toISOString().slice(0, 10);
+    }
+    return t;
+  }
+
+  function timeDiff(t1, t2) {
+    if (typeof t1 === "number" && typeof t2 === "number") {
+      return t2 - t1;
+    }
+    if (typeof t1 === "string" && typeof t2 === "string") {
+      const d1 = new Date(t1 + "T00:00:00Z").getTime();
+      const d2 = new Date(t2 + "T00:00:00Z").getTime();
+      return (d2 - d1) / 86400000;
+    }
+    return 1;
+  }
 
   function applyDrawing(d, s) {
     if (!s.candle || !s.priceChart || !d) return;
@@ -136,7 +203,7 @@ export default function CandleChart({
       });
       try {
         const all = [...s._vlineMarkers, ...(s._posMarkers || [])].sort((a, b) =>
-          a.time > b.time ? 1 : -1
+          compareTime(a.time, b.time)
         );
         s.candle.setMarkers(all);
       } catch (_) {}
@@ -156,7 +223,7 @@ export default function CandleChart({
       });
       try {
         const all = [...(s._vlineMarkers || []), ...s._posMarkers].sort((a, b) =>
-          a.time > b.time ? 1 : -1
+          compareTime(a.time, b.time)
         );
         s.candle.setMarkers(all);
       } catch (_) {}
@@ -176,7 +243,7 @@ export default function CandleChart({
       let p1 = d.p1;
       let t2 = d.t2;
       let p2 = d.p2;
-      if (t1 > t2) {
+      if (compareTime(t1, t2) > 0) {
         const tt = t1;
         t1 = t2;
         t2 = tt;
@@ -184,25 +251,25 @@ export default function CandleChart({
         p1 = p2;
         p2 = pp;
       }
-      const spanT = t2 - t1 || 1;
+      const spanT = timeDiff(t1, t2) || 1;
       const slope = (p2 - p1) / spanT;
       let pts;
       if (d.type === "ray") {
-        const t3 = t2 + spanT * 3;
+        const t3 = addTimeStep(t2, spanT * 3, 86400000);
         pts = [
           { time: t1, value: p1 },
           { time: t2, value: p2 },
-          { time: t3, value: p1 + slope * (t3 - t1) },
+          { time: t3, value: p1 + slope * timeDiff(t1, t3) },
         ];
       } else if (d.type === "extend") {
-        const t0 = t1 - spanT * 2;
-        const t3 = t2 + spanT * 2;
+        const t0 = addTimeStep(t1, -spanT * 2, 86400000);
+        const t3 = addTimeStep(t2, spanT * 2, 86400000);
         pts = [
-          { time: t0, value: p1 + slope * (t0 - t1) },
+          { time: t0, value: p1 + slope * timeDiff(t1, t0) },
           { time: t1, value: p1 },
           { time: t2, value: p2 },
-          { time: t3, value: p1 + slope * (t3 - t1) },
-        ].sort((a, b) => a.time - b.time);
+          { time: t3, value: p1 + slope * timeDiff(t1, t3) },
+        ].sort((a, b) => compareTime(a.time, b.time));
       } else {
         pts = [
           { time: t1, value: p1 },
@@ -220,8 +287,8 @@ export default function CandleChart({
       if (s.trendSeries.some((x) => x.id === d.id)) return;
       const hi = Math.max(d.p1, d.p2);
       const lo = Math.min(d.p1, d.p2);
-      const tA = Math.min(d.t1, d.t2);
-      const tB = Math.max(d.t1, d.t2);
+      const tA = compareTime(d.t1, d.t2) <= 0 ? d.t1 : d.t2;
+      const tB = compareTime(d.t1, d.t2) <= 0 ? d.t2 : d.t1;
       const top = s.priceChart.addLineSeries({
         color: "rgba(34,211,238,0.9)",
         lineWidth: 1,
@@ -298,9 +365,9 @@ export default function CandleChart({
       const p2 = d.p2;
       const t3 = d.t3;
       const p3 = d.p3;
-      const spanT = t2 - t1 || 1;
+      const spanT = timeDiff(t1, t2) || 1;
       const slope = (p2 - p1) / spanT;
-      const expected = p1 + slope * (t3 - t1);
+      const expected = p1 + slope * timeDiff(t1, t3);
       const offset = p3 - expected;
       const base = s.priceChart.addLineSeries({
         color: COLORS.draw,
@@ -314,13 +381,20 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      const tA = Math.min(t1, t2, t3);
-      const tB = Math.max(t1, t2, t3);
-      const tPad = Math.max(1, Math.floor((tB - tA) * 0.15) || 1);
-      const raw = [tA - tPad, t1, t2, t3, tB + tPad];
-      const ts = raw.filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
-      base.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) })));
-      par.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) + offset })));
+      const sorted = [t1, t2, t3].sort((a, b) => compareTime(a, b));
+      const tA = sorted[0];
+      const tB = sorted[2];
+      const tPad = Math.max(1, Math.floor(Math.abs(timeDiff(tA, tB)) * 0.15) || 1);
+      const raw = [
+        addTimeStep(tA, -tPad, 86400000),
+        t1,
+        t2,
+        t3,
+        addTimeStep(tB, tPad, 86400000),
+      ];
+      const ts = raw.filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => compareTime(a, b));
+      base.setData(ts.map((t) => ({ time: t, value: p1 + slope * timeDiff(t1, t) })));
+      par.setData(ts.map((t) => ({ time: t, value: p1 + slope * timeDiff(t1, t) + offset })));
       s.trendSeries.push({ id: d.id, series: base, extra: par });
       return;
     }
@@ -334,11 +408,12 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      const tA = Math.min(d.t1, d.t2);
-      const tB = Math.max(d.t1, d.t2);
+      const firstIsEarlier = compareTime(d.t1, d.t2) <= 0;
+      const tA = firstIsEarlier ? d.t1 : d.t2;
+      const tB = firstIsEarlier ? d.t2 : d.t1;
       series.setData([
-        { time: tA, value: d.t1 <= d.t2 ? d.p1 : d.p2 },
-        { time: tB, value: d.t1 <= d.t2 ? d.p2 : d.p1 },
+        { time: tA, value: firstIsEarlier ? d.p1 : d.p2 },
+        { time: tB, value: firstIsEarlier ? d.p2 : d.p1 },
       ]);
       const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
       s._posMarkers = s._posMarkers || [];
@@ -351,7 +426,7 @@ export default function CandleChart({
       });
       try {
         const all = [...(s._vlineMarkers || []), ...s._posMarkers].sort((a, b) =>
-          a.time > b.time ? 1 : -1
+          compareTime(a.time, b.time)
         );
         s.candle.setMarkers(all);
       } catch (_) {}
@@ -541,7 +616,7 @@ export default function CandleChart({
 
     const clickHandler = (param) => {
       const tool = toolRef.current;
-      if (tool === "none" || !param || param.point === undefined || !param.time) return;
+      if (tool === "none" || !param || param.point === undefined) return;
 
       let p = null;
       try {
@@ -553,13 +628,15 @@ export default function CandleChart({
       }
       if (p == null || !Number.isFinite(p)) return;
 
-      const t = param.time;
-      const pt = { time: t, price: p };
-
       if (tool === "hline" || tool === "hline_dot") {
         onAddRef.current?.({ id: tool + "-" + Date.now(), type: tool, price: p });
         return;
       }
+
+      const t = getClickTime(param, priceChart);
+      if (t == null) return;
+      const pt = { time: t, price: p };
+
       if (tool === "vline") {
         onAddRef.current?.({ id: "vl-" + Date.now(), type: "vline", time: t, price: p });
         return;
@@ -797,7 +874,7 @@ export default function CandleChart({
         });
       }
       if (d.type === "measure") {
-        const tB = Math.max(d.t1, d.t2);
+        const tB = compareTime(d.t1, d.t2) <= 0 ? d.t2 : d.t1;
         const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
         s._posMarkers.push({
           time: tB,
@@ -809,7 +886,9 @@ export default function CandleChart({
       }
     });
     try {
-      const all = [...s._vlineMarkers, ...s._posMarkers].sort((a, b) => (a.time > b.time ? 1 : -1));
+      const all = [...s._vlineMarkers, ...s._posMarkers].sort((a, b) =>
+        compareTime(a.time, b.time)
+      );
       s.candle.setMarkers(all);
     } catch (_) {}
 

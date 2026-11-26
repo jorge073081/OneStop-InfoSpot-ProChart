@@ -3,6 +3,7 @@ import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 import { sma, ema, rsi, bollinger, macd, stoch, atr, vwap } from "../lib/ohlcv.js";
 
 const VIEWPORT_KEY = "chart_desk_viewport";
+const FUTURE_BARS = 150;
 
 const COLORS = {
   bg: "#12161c",
@@ -103,25 +104,60 @@ export default function CandleChart({
     onDraftRef.current = onTrendDraft;
   }, [onTrendDraft]);
 
-  function getClickTime(param, priceChart) {
-    if (param && param.time != null) return param.time;
+  function getStepSeconds(list) {
+    if (!list || list.length < 2) return 86400;
+    const diff = list[list.length - 1].time - list[list.length - 2].time;
+    return diff > 0 ? diff : 86400;
+  }
+
+  function buildPaddedCandles(list) {
+    if (!list || list.length === 0) return [];
+    const step = getStepSeconds(list);
+    const lastTime = list[list.length - 1].time;
+    const padded = list.map(({ time, open, high, low, close }) => ({
+      time,
+      open,
+      high,
+      low,
+      close,
+    }));
+    for (let i = 1; i <= FUTURE_BARS; i++) {
+      padded.push({ time: lastTime + i * step });
+    }
+    return padded;
+  }
+
+  function snapToValidTime(rawTime) {
     const list = barsRef.current;
-    if (!param || !param.point || !list || list.length === 0) return null;
+    if (!list || list.length === 0 || rawTime == null) return rawTime;
+    const step = getStepSeconds(list);
+    const lastTime = list[list.length - 1].time;
+    if (rawTime <= lastTime) return rawTime;
+    const stepsAhead = Math.max(1, Math.min(FUTURE_BARS, Math.round((rawTime - lastTime) / step)));
+    return lastTime + stepsAhead * step;
+  }
+
+  function getClickTime(param, priceChart) {
+    const list = barsRef.current;
+    if (!list || list.length === 0) return null;
+
+    if (param && param.time != null) {
+      return snapToValidTime(param.time);
+    }
+    if (!param || !param.point) return null;
 
     const logical = priceChart.timeScale().coordinateToLogical(param.point.x);
     if (logical == null || !Number.isFinite(logical)) return null;
 
     const idx = Math.round(logical);
-    const step =
-      list.length >= 2
-        ? list[list.length - 1].time - list[list.length - 2].time
-        : 86400;
+    const lastIdx = list.length - 1;
+    const step = getStepSeconds(list);
 
-    if (idx < 0) return list[0].time + idx * step;
-    if (idx >= list.length) {
-      return list[list.length - 1].time + (idx - (list.length - 1)) * step;
-    }
-    return list[idx].time;
+    if (idx < 0) return list[0].time;
+    if (idx <= lastIdx) return list[idx].time;
+
+    const stepsAhead = Math.max(1, Math.min(FUTURE_BARS, idx - lastIdx));
+    return list[lastIdx].time + stepsAhead * step;
   }
 
   function applyDrawing(d, s) {
@@ -143,16 +179,17 @@ export default function CandleChart({
 
     if (d.type === "vline") {
       if (s.trendSeries.some((x) => x.id === d.id)) return;
+      const t = snapToValidTime(d.time);
       s._vlineMarkers = s._vlineMarkers || [];
       s._vlineMarkers.push({
-        time: d.time,
+        time: t,
         position: "aboveBar",
         color: COLORS.draw,
         shape: "arrowDown",
         text: "",
       });
       s._vlineMarkers.push({
-        time: d.time,
+        time: t,
         position: "belowBar",
         color: COLORS.draw,
         shape: "arrowUp",
@@ -170,9 +207,10 @@ export default function CandleChart({
 
     if (d.type === "long" || d.type === "short") {
       if (s.trendSeries.some((x) => x.id === d.id)) return;
+      const t = snapToValidTime(d.time);
       s._posMarkers = s._posMarkers || [];
       s._posMarkers.push({
-        time: d.time,
+        time: t,
         position: d.type === "long" ? "belowBar" : "aboveBar",
         color: d.type === "long" ? "#22c55e" : "#ef4444",
         shape: d.type === "long" ? "arrowUp" : "arrowDown",
@@ -196,9 +234,9 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      let t1 = d.t1;
+      let t1 = snapToValidTime(d.t1);
       let p1 = d.p1;
-      let t2 = d.t2;
+      let t2 = snapToValidTime(d.t2);
       let p2 = d.p2;
       if (t1 > t2) {
         const tt = t1;
@@ -212,7 +250,7 @@ export default function CandleChart({
       const slope = (p2 - p1) / spanT;
       let pts;
       if (d.type === "ray") {
-        const t3 = t2 + spanT * 4;
+        const t3 = snapToValidTime(t2 + spanT * 4);
         pts = [
           { time: t1, value: p1 },
           { time: t2, value: p2 },
@@ -220,7 +258,7 @@ export default function CandleChart({
         ];
       } else if (d.type === "extend") {
         const t0 = t1 - spanT * 3;
-        const t3 = t2 + spanT * 3;
+        const t3 = snapToValidTime(t2 + spanT * 3);
         pts = [
           { time: t0, value: p1 + slope * (t0 - t1) },
           { time: t1, value: p1 },
@@ -233,8 +271,15 @@ export default function CandleChart({
           { time: t2, value: p2 },
         ];
       }
+      // Deduplicate timestamps in ascending order
+      const cleanPts = [];
+      pts.forEach((pt) => {
+        if (!cleanPts.length || pt.time > cleanPts[cleanPts.length - 1].time) {
+          cleanPts.push(pt);
+        }
+      });
       try {
-        series.setData(pts);
+        series.setData(cleanPts);
       } catch (_) {}
       s.trendSeries.push({ id: d.id, series });
       return;
@@ -244,8 +289,8 @@ export default function CandleChart({
       if (s.trendSeries.some((x) => x.id === d.id)) return;
       const hi = Math.max(d.p1, d.p2);
       const lo = Math.min(d.p1, d.p2);
-      const tA = Math.min(d.t1, d.t2);
-      const tB = Math.max(d.t1, d.t2);
+      const tA = snapToValidTime(Math.min(d.t1, d.t2));
+      const tB = snapToValidTime(Math.max(d.t1, d.t2));
       const top = s.priceChart.addLineSeries({
         color: "rgba(34,211,238,0.9)",
         lineWidth: 1,
@@ -258,14 +303,16 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      top.setData([
-        { time: tA, value: hi },
-        { time: tB, value: hi },
-      ]);
-      bot.setData([
-        { time: tA, value: lo },
-        { time: tB, value: lo },
-      ]);
+      if (tB > tA) {
+        top.setData([
+          { time: tA, value: hi },
+          { time: tB, value: hi },
+        ]);
+        bot.setData([
+          { time: tA, value: lo },
+          { time: tB, value: lo },
+        ]);
+      }
       const pl1 = s.candle.createPriceLine({
         price: hi,
         color: "rgba(34,211,238,0.45)",
@@ -316,11 +363,11 @@ export default function CandleChart({
 
     if (d.type === "channel") {
       if (s.trendSeries.some((x) => x.id === d.id)) return;
-      const t1 = d.t1;
+      const t1 = snapToValidTime(d.t1);
       const p1 = d.p1;
-      const t2 = d.t2;
+      const t2 = snapToValidTime(d.t2);
       const p2 = d.p2;
-      const t3 = d.t3;
+      const t3 = snapToValidTime(d.t3);
       const p3 = d.p3;
       const spanT = t2 - t1 || 1;
       const slope = (p2 - p1) / spanT;
@@ -341,7 +388,7 @@ export default function CandleChart({
       const tA = Math.min(t1, t2, t3);
       const tB = Math.max(t1, t2, t3);
       const tPad = Math.max(1, Math.floor((tB - tA) * 0.15) || 1);
-      const raw = [tA - tPad, t1, t2, t3, tB + tPad];
+      const raw = [tA - tPad, t1, t2, t3, snapToValidTime(tB + tPad)];
       const ts = raw.filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
       base.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) })));
       par.setData(ts.map((t) => ({ time: t, value: p1 + slope * (t - t1) + offset })));
@@ -358,12 +405,16 @@ export default function CandleChart({
         lastValueVisible: false,
         priceLineVisible: false,
       });
-      const tA = Math.min(d.t1, d.t2);
-      const tB = Math.max(d.t1, d.t2);
-      series.setData([
-        { time: tA, value: d.t1 <= d.t2 ? d.p1 : d.p2 },
-        { time: tB, value: d.t1 <= d.t2 ? d.p2 : d.p1 },
-      ]);
+      const t1 = snapToValidTime(d.t1);
+      const t2 = snapToValidTime(d.t2);
+      const tA = Math.min(t1, t2);
+      const tB = Math.max(t1, t2);
+      if (tB > tA) {
+        series.setData([
+          { time: tA, value: t1 <= t2 ? d.p1 : d.p2 },
+          { time: tB, value: t1 <= t2 ? d.p2 : d.p1 },
+        ]);
+      }
       const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
       s._posMarkers = s._posMarkers || [];
       s._posMarkers.push({
@@ -400,12 +451,16 @@ export default function CandleChart({
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 25,
+      },
       width: container.clientWidth,
       height: container.clientHeight,
     });
 
-    // Save pan & zoom whenever user moves the chart
     const saveViewport = (range) => {
       if (range && range.from != null && range.to != null) {
         try {
@@ -640,11 +695,23 @@ export default function CandleChart({
 
     priceChart.subscribeClick(clickHandler);
 
-    // Double-click -> clear saved zoom & fit content (keeps drawings)
+    const fitActualBars = () => {
+      const list = barsRef.current;
+      if (list && list.length > 0) {
+        priceChart.timeScale().setVisibleLogicalRange({
+          from: 0,
+          to: list.length - 1 + 25,
+        });
+      } else {
+        priceChart.timeScale().fitContent();
+      }
+    };
+
+    // Double-click -> clear saved zoom & fit actual candles + 25 future slots
     const dblHandler = () => {
       try {
         localStorage.removeItem(VIEWPORT_KEY);
-        priceChart.timeScale().fitContent();
+        fitActualBars();
         priceChart.priceScale("right").applyOptions({ autoScale: true });
       } catch (_) {}
     };
@@ -801,15 +868,16 @@ export default function CandleChart({
     s._posMarkers = [];
     drawings.forEach((d) => {
       if (d.type === "vline") {
+        const t = snapToValidTime(d.time);
         s._vlineMarkers.push({
-          time: d.time,
+          time: t,
           position: "aboveBar",
           color: COLORS.draw,
           shape: "arrowDown",
           text: "",
         });
         s._vlineMarkers.push({
-          time: d.time,
+          time: t,
           position: "belowBar",
           color: COLORS.draw,
           shape: "arrowUp",
@@ -817,8 +885,9 @@ export default function CandleChart({
         });
       }
       if (d.type === "long" || d.type === "short") {
+        const t = snapToValidTime(d.time);
         s._posMarkers.push({
-          time: d.time,
+          time: t,
           position: d.type === "long" ? "belowBar" : "aboveBar",
           color: d.type === "long" ? "#22c55e" : "#ef4444",
           shape: d.type === "long" ? "arrowUp" : "arrowDown",
@@ -826,7 +895,7 @@ export default function CandleChart({
         });
       }
       if (d.type === "measure") {
-        const tB = Math.max(d.t1, d.t2);
+        const tB = snapToValidTime(Math.max(d.t1, d.t2));
         const pct = d.p1 ? ((d.p2 - d.p1) / Math.abs(d.p1)) * 100 : 0;
         s._posMarkers.push({
           time: tB,
@@ -856,9 +925,9 @@ export default function CandleChart({
       String(first.time) + "_" + String(second ? second.time : 0) + "_" + String(first.open);
 
     if (s.datasetKey !== currentKey) {
-      s.candle.setData(
-        bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close }))
-      );
+      // Pad candlestick series with future whitespace bars so timeScale natively indexes future timestamps
+      s.candle.setData(buildPaddedCandles(bars));
+
       s.volume.setData(
         bars.map((b) => ({
           time: b.time,
@@ -898,7 +967,7 @@ export default function CandleChart({
         );
       }
 
-      // Restore saved zoom/pan instead of resetting to fitContent
+      // Restore saved zoom/pan instead of zooming out to all 150 empty future bars
       let restored = false;
       try {
         const saved = localStorage.getItem(VIEWPORT_KEY);
@@ -912,7 +981,10 @@ export default function CandleChart({
       } catch (_) {}
 
       if (!restored) {
-        s.priceChart.timeScale().fitContent();
+        s.priceChart.timeScale().setVisibleLogicalRange({
+          from: 0,
+          to: bars.length - 1 + 25,
+        });
       }
 
       s.datasetKey = currentKey;

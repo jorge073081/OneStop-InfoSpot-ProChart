@@ -632,71 +632,117 @@ export default function App() {
           </span>
         </div>
 
-        <div className="intervals">
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}>
           <button
             type="button"
             className={"interval-btn" + (showWatch ? " active" : "")}
             onClick={() => setShowWatch((v) => !v)}
             title="Watchlist"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
           >
-            {showWatch ? "Hide list" : "Watchlist"}
+            ★ {watchlist.length || ""}
           </button>
           <button
             type="button"
             className="interval-btn"
             onClick={addToWatchlist}
-            title={"Add " + displaySymbol(symbol) + " to watchlist"}
+            title={"Add " + displaySymbol(symbol)}
+            style={{ fontSize: "0.72rem", padding: "4px 8px", minWidth: 28 }}
           >
-            + {displaySymbol(symbol)}
+            +
           </button>
+          {showWatch ? (
+            <div
+              role="listbox"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                right: 0,
+                zIndex: 80,
+                width: 168,
+                maxHeight: 220,
+                overflowY: "auto",
+                padding: "6px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 6px 6px",
+                }}
+              >
+                Watchlist
+              </div>
+              {watchlist.length === 0 ? (
+                <div style={{ fontSize: "0.72rem", color: "#8b9bb4", padding: "6px" }}>
+                  No tickers yet
+                </div>
+              ) : (
+                watchlist.map((sym) => (
+                  <div
+                    key={sym}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2,
+                      marginBottom: 2,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openWatchSymbol(sym)}
+                      style={{
+                        flex: 1,
+                        textAlign: "left",
+                        fontSize: "0.72rem",
+                        padding: "5px 8px",
+                        borderRadius: 6,
+                        border: "none",
+                        cursor: "pointer",
+                        background: symbol === sym ? "rgba(34, 211, 238, 0.15)" : "transparent",
+                        color: symbol === sym ? "#22d3ee" : "#c5d0e0",
+                        fontWeight: symbol === sym ? 600 : 500,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (symbol !== sym) e.currentTarget.style.background = "rgba(148,163,184,0.1)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (symbol !== sym) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      {displaySymbol(sym)}
+                    </button>
+                    <button
+                      type="button"
+                      title="Remove"
+                      onClick={() => removeFromWatchlist(sym)}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#6b7c93",
+                        cursor: "pointer",
+                        fontSize: "0.8rem",
+                        padding: "2px 6px",
+                        lineHeight: 1,
+                        borderRadius: 4,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
         </div>
 
-        {showWatch ? (
-          <div
-            className="intervals"
-            style={{
-              flexWrap: "wrap",
-              maxWidth: 560,
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {watchlist.length === 0 ? (
-              <span className="hint">Empty — click + to save the current ticker</span>
-            ) : (
-              watchlist.map((sym) => (
-                <span
-                  key={sym}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    marginRight: 4,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className={
-                      "interval-btn" + (symbol === sym ? " active" : "")
-                    }
-                    onClick={() => openWatchSymbol(sym)}
-                  >
-                    {displaySymbol(sym)}
-                  </button>
-                  <button
-                    type="button"
-                    className="interval-btn"
-                    title="Remove"
-                    onClick={() => removeFromWatchlist(sym)}
-                    style={{ padding: "0 6px", opacity: 0.75 }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))
-            )}
-          </div>
-        ) : null}
 
         {showIndBox ? (
           <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 560 }}>

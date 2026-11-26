@@ -1,457 +1,249 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import CandleChart from "./components/CandleChart.jsx";
-import { fetchOHLCV, toCoinbaseProduct } from "./lib/ohlcv.js";
-import { INTERVALS, displaySymbol, normalizeSymbol } from "./lib/symbols.js";
-
-const INTERVAL_SECONDS = {
-  "1m": 60,
-  "5m": 300,
-  "15m": 900,
-  "1h": 3600,
-  "4h": 14400,
-  "1d": 86400,
-  "1w": 604800,
-};
-
-function readParams() {
-  const q = new URLSearchParams(window.location.search);
-  const symbol = normalizeSymbol(q.get("symbol") || q.get("ticker") || "BTCUSDT");
-  const interval = q.get("interval") || q.get("tf") || "1d";
-  const valid = INTERVALS.some((i) => i.id === interval) ? interval : "1d";
-  return { symbol, interval: valid };
+:root {
+  color-scheme: dark;
+  --bg: #0b0e11;
+  --panel: #12161c;
+  --border: #1e2630;
+  --text: #e8eef7;
+  --muted: #8b9bb4;
+  --accent: #22d3ee;
+  --green: #22c55e;
+  --red: #ef4444;
+  --font: "IBM Plex Sans", system-ui, sans-serif;
 }
 
-function writeParams(symbol, interval) {
-  const q = new URLSearchParams();
-  q.set("symbol", symbol);
-  q.set("interval", interval);
-  const url = `${window.location.pathname}?${q.toString()}`;
-  window.history.replaceState({}, "", url);
+* {
+  box-sizing: border-box;
 }
 
-export default function App() {
-  const initial = useMemo(() => readParams(), []);
-  const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
-  const [symbol, setSymbol] = useState(initial.symbol);
-  const [interval, setInterval] = useState(initial.interval);
-  const [bars, setBars] = useState([]);
-  const [dataSource, setDataSource] = useState("coinbase");
-  const [status, setStatus] = useState("Loading…");
-  const [liveState, setLiveState] = useState("Connecting…");
-  const [error, setError] = useState("");
-  const [showIndBox, setShowIndBox] = useState(false);
-  const [showSma50, setShowSma50] = useState(true);
-  const [showSma200, setShowSma200] = useState(false);
-  const [showEma9, setShowEma9] = useState(false);
-  const [showEma21, setShowEma21] = useState(false);
-  const [showEma50, setShowEma50] = useState(false);
-  const [showBb, setShowBb] = useState(false);
-  const [showVwap, setShowVwap] = useState(false);
-  const [showRsi, setShowRsi] = useState(true);
-  const [showMacd, setShowMacd] = useState(false);
-  const [showStoch, setShowStoch] = useState(false);
-  const [showAtr, setShowAtr] = useState(false);
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
 
-  // Drawing tools (client-side — free, no TV)
-  const [showDrawBox, setShowDrawBox] = useState(false);
-  const [drawTool, setDrawTool] = useState("none");
-  const [drawings, setDrawings] = useState([]);
-  // draft: null | { points: [{time,price}, ...] } for multi-click tools
-  const [trendDraft, setTrendDraft] = useState(null);
+button,
+input,
+select {
+  font-family: inherit;
+}
 
-  const load = useCallback(async (sym, tf) => {
-    setStatus("Loading…");
-    setError("");
-    setDrawings([]);
-    setTrendDraft(null);
-    setDrawTool("none");
-    // keep showDrawBox as user preference
-    try {
-      const binanceInterval = INTERVALS.find((i) => i.id === tf)?.binance || "1d";
-      const { bars: data, source } = await fetchOHLCV(sym, binanceInterval, 500);
-      setBars(data);
-      setDataSource(source);
-      writeParams(sym, tf);
-      const last = data[data.length - 1];
-      const prev = data[data.length - 2];
-      const chg = prev ? ((last.close / prev.close - 1) * 100).toFixed(2) : "0.00";
-      const sign = Number(chg) >= 0 ? "+" : "";
-      setStatus(`${displaySymbol(sym)} · ${tf.toUpperCase()} · last ${last.close} (${sign}${chg}%)`);
-    } catch (e) {
-      setBars([]);
-      setError(e.message || String(e));
-      setStatus("Failed to load");
-    }
-  }, []);
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100vh;
+}
 
-  useEffect(() => {
-    load(symbol, interval);
-  }, [symbol, interval, load]);
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
 
-  useEffect(() => {
-    if (!bars.length) return;
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin-right: 6px;
+}
 
-    let ws;
-    let reconnectTimer;
-    let isCancelled = false;
+.symbol-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 
-    const connectCoinbase = () => {
-      if (isCancelled) return;
-      setLiveState("Connecting…");
-      const product = toCoinbaseProduct(symbol);
-      const bucketSec = INTERVAL_SECONDS[interval] || 86400;
+.symbol-form input {
+  background: #0b0e11;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 140px;
+  outline: none;
+}
 
-      ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
+.symbol-form input:focus {
+  border-color: var(--accent);
+}
 
-      ws.onopen = () => {
-        if (isCancelled) return;
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            product_ids: [product],
-            channels: ["ticker"],
-          })
-        );
-        setLiveState("● LIVE (Coinbase)");
-      };
+.symbol-form button,
+.interval-btn {
+  background: #1a222d;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type !== "ticker" || !msg.price) return;
+.symbol-form button:hover,
+.interval-btn:hover {
+  border-color: var(--accent);
+}
 
-          const price = parseFloat(msg.price);
-          const tradeSize = parseFloat(msg.last_size || 0);
-          const tradeTime = msg.time ? Math.floor(new Date(msg.time).getTime() / 1000) : Math.floor(Date.now() / 1000);
-          const candleStart = Math.floor(tradeTime / bucketSec) * bucketSec;
+.interval-btn.active {
+  background: rgba(34, 211, 238, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
-          setBars((prevBars) => {
-            if (!prevBars.length) return prevBars;
-            const lastBar = prevBars[prevBars.length - 1];
+.intervals {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 
-            if (candleStart === lastBar.time) {
-              const updatedBar = {
-                ...lastBar,
-                high: Math.max(lastBar.high, price),
-                low: Math.min(lastBar.low, price),
-                close: price,
-                volume: lastBar.volume + tradeSize,
-              };
-              const updated = [...prevBars];
-              updated[updated.length - 1] = updatedBar;
-              return updated;
-            } else if (candleStart > lastBar.time) {
-              const newBar = {
-                time: candleStart,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: tradeSize,
-              };
-              return [...prevBars.slice(1), newBar];
-            }
-            return prevBars;
-          });
-        } catch {}
-      };
+.meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
 
-      ws.onerror = () => {
-        if (!isCancelled) setLiveState("Reconnecting…");
-      };
+.meta .up {
+  color: var(--green);
+}
 
-      ws.onclose = () => {
-        if (!isCancelled) {
-          setLiveState("Reconnecting…");
-          reconnectTimer = setTimeout(connectCoinbase, 3000);
-        }
-      };
-    };
+.meta .down {
+  color: var(--red);
+}
 
-    const connectBinance = () => {
-      if (isCancelled) return;
-      setLiveState("Connecting…");
-      const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
-      const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
-      ws = new WebSocket(`wss://stream.binance.us:9443/ws/${streamName}`);
+/* Main workspace with left drawing toolbar */
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
 
-      ws.onopen = () => {
-        if (!isCancelled) setLiveState("● LIVE (Binance.US)");
-      };
+.draw-sidebar {
+  width: 46px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+  overflow-y: auto;
+  user-select: none;
+}
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (!msg.k) return;
-          const k = msg.k;
-          const liveBar = {
-            time: Math.floor(k.t / 1000),
-            open: parseFloat(k.o),
-            high: parseFloat(k.h),
-            low: parseFloat(k.l),
-            close: parseFloat(k.c),
-            volume: parseFloat(k.v),
-          };
+.draw-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+  flex-shrink: 0;
+}
 
-          setBars((prevBars) => {
-            if (!prevBars.length) return prevBars;
-            const lastBar = prevBars[prevBars.length - 1];
-            if (lastBar.time === liveBar.time) {
-              const updated = [...prevBars];
-              updated[updated.length - 1] = liveBar;
-              return updated;
-            } else if (liveBar.time > lastBar.time) {
-              return [...prevBars.slice(1), liveBar];
-            }
-            return prevBars;
-          });
-        } catch {}
-      };
+.tool-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
 
-      ws.onerror = () => {
-        if (!isCancelled) setLiveState("Reconnecting…");
-      };
+.tool-btn:hover {
+  background: #1a222d;
+  color: var(--text);
+}
 
-      ws.onclose = () => {
-        if (!isCancelled) {
-          setLiveState("Reconnecting…");
-          reconnectTimer = setTimeout(connectBinance, 3000);
-        }
-      };
-    };
+.tool-btn.active {
+  background: rgba(34, 211, 238, 0.15);
+  border-color: rgba(34, 211, 238, 0.45);
+  color: var(--accent);
+}
 
-    if (dataSource === "coinbase") {
-      connectCoinbase();
-    } else {
-      connectBinance();
-    }
+.tool-btn.long-btn.active {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.5);
+  color: var(--green);
+}
 
-    return () => {
-      isCancelled = true;
-      clearTimeout(reconnectTimer);
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        ws.close();
-      }
-    };
-  }, [symbol, interval, dataSource, bars.length > 0]);
+.tool-btn.short-btn.active {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: var(--red);
+}
 
-  const onSubmit = (e) => {
-    e.preventDefault();
-    const next = normalizeSymbol(symbolInput);
-    setSymbol(next);
-    setSymbolInput(displaySymbol(next));
-  };
+.tool-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
 
-  const last = bars[bars.length - 1];
-  const prev = bars[bars.length - 2];
-  const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
-  const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
-  const chgText = chgPct != null ? chgPct.toFixed(2) : "0.00";
+.chart-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-  return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">CHART DESK</div>
+.draw-banner {
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  color: var(--accent);
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 
-        <form className="symbol-form" onSubmit={onSubmit}>
-          <input
-            value={symbolInput}
-            onChange={(e) => setSymbolInput(e.target.value)}
-            placeholder="BTC-USD or BTCUSDT"
-            aria-label="Symbol"
-          />
-          <button type="submit">Load</button>
-        </form>
+.chart-panel {
+  flex: 1;
+  min-height: 320px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+}
 
-        <div className="intervals">
-          {INTERVALS.map((i) => (
-            <button
-              key={i.id}
-              type="button"
-              className={`interval-btn${interval === i.id ? " active" : ""}`}
-              onClick={() => setInterval(i.id)}
-            >
-              {i.label}
-            </button>
-          ))}
-        </div>
+.chart-panel.rsi {
+  flex: 0 0 140px;
+  min-height: 140px;
+}
 
-        <div className="intervals">
-          <button
-            type="button"
-            className={`interval-btn${showIndBox ? " active" : ""}`}
-            onClick={() => setShowIndBox((v) => !v)}
-          >
-            {showIndBox ? "Hide indicators" : "Indicators"}
-          </button>
-        </div>
+.chart-el {
+  width: 100%;
+  height: 100%;
+}
 
-        {showIndBox ? (
-          <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 560 }}>
-            {[
-              ["SMA 50", showSma50, setShowSma50],
-              ["SMA 200", showSma200, setShowSma200],
-              ["EMA 9", showEma9, setShowEma9],
-              ["EMA 21", showEma21, setShowEma21],
-              ["EMA 50", showEma50, setShowEma50],
-              ["BB", showBb, setShowBb],
-              ["VWAP", showVwap, setShowVwap],
-              ["RSI", showRsi, setShowRsi],
-              ["MACD", showMacd, setShowMacd],
-              ["Stoch", showStoch, setShowStoch],
-              ["ATR", showAtr, setShowAtr],
-            ].map(([label, val, set]) => (
-              <label key={label} className="hint" style={{ marginRight: 6 }}>
-                <input type="checkbox" checked={val} onChange={(e) => set(e.target.checked)} /> {label}
-              </label>
-            ))}
-          </div>
-        ) : null}
+.status {
+  padding: 8px 14px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-top: 1px solid var(--border);
+}
 
-        <div className="intervals">
-          <button
-            type="button"
-            className={`interval-btn${showDrawBox ? " active" : ""}`}
-            onClick={() => {
-              setShowDrawBox((v) => !v);
-              if (showDrawBox) {
-                setDrawTool("none");
-                setTrendDraft(null);
-              }
-            }}
-          >
-            {showDrawBox ? "Hide tools" : "Draw tools"}
-          </button>
-        </div>
+.status.error {
+  color: #fca5a5;
+}
 
-        {showDrawBox ? (
-          <div className="intervals" style={{ flexWrap: "wrap", maxWidth: 520 }}>
-            {[
-              ["none", "Navigate"],
-              ["hline", "H-Line"],
-              ["hline_dot", "H-Dash"],
-              ["vline", "V-Line"],
-              ["trend", "Trend"],
-              ["ray", "Ray"],
-              ["extend", "Extend"],
-              ["rect", "Rect"],
-              ["fib", "Fib"],
-              ["fibext", "Fib Ext"],
-              ["channel", "Channel"],
-              ["measure", "Measure"],
-              ["long", "Long"],
-              ["short", "Short"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={`interval-btn${drawTool === id ? " active" : ""}`}
-                onClick={() => {
-                  setDrawTool(id);
-                  setTrendDraft(null);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="interval-btn"
-              onClick={() => {
-                setDrawings([]);
-                setTrendDraft(null);
-              }}
-            >
-              Clear all
-            </button>
-          </div>
-        ) : null}
-
-        <div className="meta">
-          {last ? (
-            <>
-              <strong>{last.close}</strong>{" "}
-              {chgPct != null && (
-                <span className={chgPct >= 0 ? "up" : "down"}>
-                  {chgSign}
-                  {chgText}%
-                </span>
-              )}
-            </>
-          ) : (
-            "—"
-          )}
-        </div>
-      </header>
-
-      {(showDrawBox && drawTool !== "none") ? (
-        <div className="status" style={{ borderTop: "none", paddingTop: 4, paddingBottom: 4 }}>
-          ✏️{" "}
-          {{
-            hline: "Click to place solid horizontal line",
-            hline_dot: "Click to place dashed horizontal line",
-            vline: "Click to place vertical marker",
-            trend: trendDraft ? "Click 2nd point — trend line" : "Click 1st point — trend line",
-            ray: trendDraft ? "Click direction point — ray" : "Click start of ray",
-            extend: trendDraft ? "Click 2nd point — extended line both ways" : "Click 1st point — extended line",
-            rect: trendDraft ? "Click opposite corner — rectangle" : "Click first corner — rectangle",
-            fib: trendDraft ? "Click 2nd swing — Fib retracement" : "Click 1st swing — Fib",
-            fibext: trendDraft ? "Click 2nd swing — Fib extension" : "Click 1st swing — Fib Ext",
-            channel: !trendDraft
-              ? "Channel: click point 1 (base start)"
-              : trendDraft.points?.length === 1
-                ? "Channel: click point 2 (base end)"
-                : "Channel: click point 3 (parallel width)",
-            measure: trendDraft ? "Click end — measure % and $ move" : "Click start — measure tool",
-            long: "Click to mark long / buy",
-            short: "Click to mark short / sell",
-          }[drawTool] || "Draw mode"}
-          {drawings.length ? ` · ${drawings.length} object(s)` : ""}
-        </div>
-      ) : null}
-
-      <main className="chart-wrap">
-        {bars.length > 0 ? (
-          <CandleChart
-            bars={bars}
-            showSma50={showSma50}
-            showSma200={showSma200}
-            showEma9={showEma9}
-            showEma21={showEma21}
-            showEma50={showEma50}
-            showBb={showBb}
-            showVwap={showVwap}
-            showRsi={showRsi}
-            showMacd={showMacd}
-            showStoch={showStoch}
-            showAtr={showAtr}
-            drawTool={drawTool}
-            drawings={drawings}
-            onAddDrawing={(d) => setDrawings((prev) => [...prev, d])}
-            trendDraft={trendDraft}
-            onTrendDraft={setTrendDraft}
-          />
-        ) : (
-          <div className="chart-panel" style={{ display: "grid", placeItems: "center", color: "#8b9bb4" }}>
-            {error || "No data"}
-          </div>
-        )}
-      </main>
-
-      <footer className={`status${error ? " error" : ""}`}>
-        {error || (
-          <>
-            <span style={{ color: liveState.startsWith("● LIVE") ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
-              {liveState}
-            </span>
-            {" · "}
-            {last
-              ? `${displaySymbol(symbol)} · ${interval.toUpperCase()} · last ${last.close} (${chgSign}${chgText}%)`
-              : status}
-          </>
-        )}
-        <span className="hint"> · Double-click chart to fit · $0 stack: LWC + Coinbase / Binance.US</span>
-      </footer>
-    </div>
-  );
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
 }

@@ -316,7 +316,7 @@ export default function App() {
 
   // Multi-TF alignment badge (15m / 1H / 4H). Independent of main chart bars.
   // Failures never clear the chart — only update the badge.
-  // Refreshes on symbol change and every 3 minutes while the tab is open.
+  // NOTE: chart timeframe state is also named setInterval — always use window.setInterval here.
   useEffect(() => {
     let cancelled = false;
     let timer = null;
@@ -336,23 +336,28 @@ export default function App() {
         const b15 = r15 && r15.bars ? tfBias(r15.bars) : null;
         const b1h = r1h && r1h.bars ? tfBias(r1h.bars) : null;
         const b4h = r4h && r4h.bars ? tfBias(r4h.bars) : null;
-        setAlignInfo(alignmentSummary(b15, b1h, b4h));
+        const summary = alignmentSummary(b15, b1h, b4h);
+        const when = new Date().toLocaleTimeString();
+        setAlignInfo({
+          ...summary,
+          title: (summary.title || "") + " · refreshed " + when,
+        });
       } catch (_) {
         if (!cancelled && isInitial) {
           setAlignInfo({ label: "TF —", title: "Alignment unavailable", tone: "muted" });
         }
-        // On background refresh failure: keep the last good badge (no flicker / no chart touch)
       }
     };
 
     run(true);
-    timer = setInterval(() => {
+    // 60s so you can verify; still light on free APIs (3 small requests/min)
+    timer = window.setInterval(function () {
       run(false);
-    }, 3 * 60 * 1000);
+    }, 60 * 1000);
 
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      if (timer != null) window.clearInterval(timer);
     };
   }, [symbol]);
 

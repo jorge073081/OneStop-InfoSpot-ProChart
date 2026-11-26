@@ -13,6 +13,53 @@ const INTERVAL_SECONDS = {
   "1w": 604800,
 };
 
+/** Multi-TF bias from close vs SMA20. Returns "bull" | "bear" | "neutral" | null */
+function tfBias(bars) {
+  if (!bars || bars.length < 25) return null;
+  let sum = 0;
+  const n = 20;
+  for (let i = bars.length - n; i < bars.length; i++) sum += bars[i].close;
+  const sma = sum / n;
+  const close = bars[bars.length - 1].close;
+  if (close > sma * 1.001) return "bull";
+  if (close < sma * 0.999) return "bear";
+  return "neutral";
+}
+
+function alignmentSummary(b15, b1h, b4h) {
+  const parts = [
+    { tf: "15m", bias: b15 },
+    { tf: "1H", bias: b1h },
+    { tf: "4H", bias: b4h },
+  ];
+  const known = parts.filter((p) => p.bias);
+  if (!known.length) {
+    return { label: "TF —", title: "Alignment loading or unavailable", tone: "muted" };
+  }
+  const bulls = known.filter((p) => p.bias === "bull").length;
+  const bears = known.filter((p) => p.bias === "bear").length;
+  const detail = parts
+    .map((p) => {
+      const arrow = p.bias === "bull" ? "↑" : p.bias === "bear" ? "↓" : p.bias === "neutral" ? "→" : "·";
+      return p.tf + arrow;
+    })
+    .join(" ");
+  if (bulls === known.length && bulls >= 2) {
+    return { label: "ALIGNED ↑", title: detail + " (all bullish vs SMA20)", tone: "up" };
+  }
+  if (bears === known.length && bears >= 2) {
+    return { label: "ALIGNED ↓", title: detail + " (all bearish vs SMA20)", tone: "down" };
+  }
+  if (bulls >= 2) {
+    return { label: "LEAN ↑", title: detail, tone: "up" };
+  }
+  if (bears >= 2) {
+    return { label: "LEAN ↓", title: detail, tone: "down" };
+  }
+  return { label: "MIXED", title: detail, tone: "muted" };
+}
+
+
 function readParams() {
   const q = new URLSearchParams(window.location.search);
   const symbol = normalizeSymbol(q.get("symbol") || q.get("ticker") || "BTCUSDT");
@@ -201,6 +248,7 @@ export default function App() {
   const [status, setStatus] = useState("Loading…");
   const [liveState, setLiveState] = useState("Connecting…");
   const [error, setError] = useState("");
+  const [alignInfo, setAlignInfo] = useState({ label: "TF —", title: "Multi-TF alignment", tone: "muted" });
   const [showIndBox, setShowIndBox] = useState(false);
   const [showSma50, setShowSma50] = useState(true);
   const [showSma200, setShowSma200] = useState(false);
@@ -264,6 +312,38 @@ export default function App() {
   useEffect(() => {
     load(symbol, interval);
   }, [symbol, interval, load]);
+
+
+  // Multi-TF alignment badge (15m / 1H / 4H). Independent of main chart bars.
+  // Failures never clear the chart — only update the badge.
+  useEffect(() => {
+    let cancelled = false;
+    setAlignInfo({ label: "TF …", title: "Loading 15m / 1H / 4H bias", tone: "muted" });
+
+    (async () => {
+      try {
+        const [r15, r1h, r4h] = await Promise.all([
+          fetchOHLCV(symbol, "15m", 80).catch(() => null),
+          fetchOHLCV(symbol, "1h", 80).catch(() => null),
+          fetchOHLCV(symbol, "4h", 80).catch(() => null),
+        ]);
+        if (cancelled) return;
+        const b15 = r15 && r15.bars ? tfBias(r15.bars) : null;
+        const b1h = r1h && r1h.bars ? tfBias(r1h.bars) : null;
+        const b4h = r4h && r4h.bars ? tfBias(r4h.bars) : null;
+        setAlignInfo(alignmentSummary(b15, b1h, b4h));
+      } catch (_) {
+        if (!cancelled) {
+          setAlignInfo({ label: "TF —", title: "Alignment unavailable", tone: "muted" });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
 
   useEffect(() => {
     if (!bars.length) return;
@@ -461,6 +541,42 @@ export default function App() {
           >
             {showIndBox ? "Hide indicators" : "Indicators"}
           </button>
+        </div>
+
+        
+        <div
+          className="intervals"
+          title={alignInfo.title}
+          style={{ alignItems: "center" }}
+        >
+          <span
+            className={
+              "interval-btn" +
+              (alignInfo.tone === "up" ? " active" : "")
+            }
+            style={{
+              cursor: "default",
+              pointerEvents: "none",
+              opacity: 0.95,
+              color:
+                alignInfo.tone === "up"
+                  ? "#22c55e"
+                  : alignInfo.tone === "down"
+                    ? "#ef4444"
+                    : undefined,
+              borderColor:
+                alignInfo.tone === "up"
+                  ? "rgba(34,197,94,0.45)"
+                  : alignInfo.tone === "down"
+                    ? "rgba(239,68,68,0.45)"
+                    : undefined,
+              fontSize: "0.78rem",
+              fontWeight: 600,
+              letterSpacing: "0.02em",
+            }}
+          >
+            {alignInfo.label}
+          </span>
         </div>
 
         {showIndBox ? (

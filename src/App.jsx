@@ -997,6 +997,11 @@ export default function App() {
   const [showSessions, setShowSessions] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [showMultiTf, setShowMultiTf] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareInput, setCompareInput] = useState("ETH-USD");
+  const [compareSymbol, setCompareSymbol] = useState("ETHUSDT");
+  const [compareBars, setCompareBars] = useState([]);
+  const [compareStatus, setCompareStatus] = useState("");
   const [multiBarsA, setMultiBarsA] = useState([]);
   const [multiBarsB, setMultiBarsB] = useState([]);
   const [multiLabelA, setMultiLabelA] = useState("");
@@ -1334,6 +1339,45 @@ export default function App() {
       if (pollTimer != null) window.clearInterval(pollTimer);
     };
   }, [showMultiTf, symbol, interval]);
+
+  // Multi-asset compare pane — same interval, second symbol
+  useEffect(() => {
+    if (!showCompare) return undefined;
+    let cancelled = false;
+    let poll = null;
+    setCompareStatus("Loading " + displaySymbol(compareSymbol) + "...");
+
+    const load = async (initial) => {
+      if (cancelled) return;
+      try {
+        const binanceInterval =
+          (INTERVALS.find((i) => i.id === interval) || {}).binance || "1d";
+        const res = await fetchOHLCV(compareSymbol, binanceInterval, 500);
+        if (cancelled) return;
+        setCompareBars(res.bars || []);
+        setCompareStatus(
+          displaySymbol(compareSymbol) + " · " + (res.source || "ok")
+        );
+      } catch (e) {
+        if (!cancelled && initial) {
+          setCompareBars([]);
+          setCompareStatus(e.message || "Compare load failed");
+        }
+      }
+    };
+
+    load(true);
+    poll = window.setInterval(function () {
+      load(false);
+    }, 20 * 1000);
+
+    return () => {
+      cancelled = true;
+      if (poll != null) window.clearInterval(poll);
+    };
+  }, [showCompare, compareSymbol, interval]);
+
+
 
 
 
@@ -1847,10 +1891,64 @@ export default function App() {
           className={"interval-btn" + (showMultiTf ? " active" : "")}
           title="Multi-timeframe split view"
           style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-          onClick={() => setShowMultiTf((v) => !v)}
+          onClick={() =>
+            setShowMultiTf((v) => {
+              const next = !v;
+              if (next) setShowCompare(false);
+              return next;
+            })
+          }
         >
           Multi-TF
         </button>
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showCompare ? " active" : "")}
+            title="Compare another asset"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={() => {
+              setShowCompare((v) => {
+                const next = !v;
+                if (next) setShowMultiTf(false);
+                return next;
+              });
+            }}
+          >
+            Compare
+          </button>
+          {showCompare ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const next = normalizeSymbol(compareInput);
+                setCompareSymbol(next);
+                setCompareInput(displaySymbol(next));
+              }}
+              style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
+            >
+              <input
+                value={compareInput}
+                onChange={(e) => setCompareInput(e.target.value)}
+                placeholder="ETH-USD"
+                style={{
+                  width: 88,
+                  height: 26,
+                  fontSize: "0.68rem",
+                  padding: "2px 6px",
+                  borderRadius: 6,
+                  border: "1px solid #1e2630",
+                  background: "#0b0e11",
+                  color: "#e8eef7",
+                }}
+              />
+              <button type="submit" className="interval-btn" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>
+                Go
+              </button>
+            </form>
+          ) : null}
+        </div>
+
 
 <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
@@ -2606,7 +2704,7 @@ export default function App() {
           </button>
         </aside>
 
-        <main className={"chart-wrap" + (showMultiTf ? " multi-tf" : "")}>
+        <main className={"chart-wrap" + (showMultiTf ? " multi-tf" : "") + (showCompare ? " compare-assets" : "")}>
           {drawTool !== "none" ? (
             <div className="draw-banner">
               <span>
@@ -2683,6 +2781,16 @@ export default function App() {
               <MiniChart bars={multiBarsA} label={(multiLabelA || "TF-A") + (multiStatus ? " · " + multiStatus : "")} />
               <MiniChart bars={multiBarsB} label={multiLabelB || "TF-B"} />
             </>
+          ) : null}
+          {showCompare ? (
+            <MiniChart
+              bars={compareBars}
+              label={
+                (compareStatus || displaySymbol(compareSymbol)) +
+                " · " +
+                String(interval).toUpperCase()
+              }
+            />
           ) : null}
         </main>
       </div>

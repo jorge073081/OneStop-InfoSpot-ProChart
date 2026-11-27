@@ -60,20 +60,50 @@ function alignmentSummary(b15, b1h, b4h) {
 }
 
 
+function encodeDrawings(drawings) {
+  try {
+    if (!drawings || !drawings.length) return "";
+    const json = JSON.stringify(drawings);
+    // base64url
+    const b64 = btoa(unescape(encodeURIComponent(json)));
+    return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  } catch {
+    return "";
+  }
+}
+
+function decodeDrawings(raw) {
+  try {
+    if (!raw) return null;
+    let b64 = String(raw).replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const json = decodeURIComponent(escape(atob(b64)));
+    const arr = JSON.parse(json);
+    return Array.isArray(arr) ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
 function readParams() {
   const q = new URLSearchParams(window.location.search);
   const symbol = normalizeSymbol(q.get("symbol") || q.get("ticker") || "BTCUSDT");
   const interval = q.get("interval") || q.get("tf") || "1d";
   const valid = INTERVALS.some((i) => i.id === interval) ? interval : "1d";
-  return { symbol, interval: valid };
+  const fromUrl = decodeDrawings(q.get("d") || q.get("drawings") || "");
+  return { symbol, interval: valid, drawingsFromUrl: fromUrl };
 }
 
-function writeParams(symbol, interval) {
+function writeParams(symbol, interval, drawings) {
   const q = new URLSearchParams();
   q.set("symbol", symbol);
   q.set("interval", interval);
-  const url = `${window.location.pathname}?${q.toString()}`;
+  const enc = encodeDrawings(drawings);
+  // keep URLs usable — skip drawings payload if huge
+  if (enc && enc.length < 1800) q.set("d", enc);
+  const url = window.location.pathname + "?" + q.toString();
   window.history.replaceState({}, "", url);
+  return window.location.origin + url;
 }
 
 const TOOL_GROUPS = [
@@ -397,6 +427,9 @@ export default function App() {
 
   const [drawTool, setDrawTool] = useState("none");
   const [drawings, setDrawings] = useState(() => {
+    if (initial.drawingsFromUrl && initial.drawingsFromUrl.length) {
+      return initial.drawingsFromUrl;
+    }
     try {
       const saved = localStorage.getItem(`chart_desk_drawings_${initial.symbol}`);
       return saved ? JSON.parse(saved) : [];
@@ -404,13 +437,17 @@ export default function App() {
       return [];
     }
   });
+  const [shareHint, setShareHint] = useState("");
   const [trendDraft, setTrendDraft] = useState(null);
 
   useEffect(() => {
     try {
       localStorage.setItem(`chart_desk_drawings_${symbol}`, JSON.stringify(drawings));
     } catch {}
-  }, [drawings, symbol]);
+    try {
+      writeParams(symbol, interval, drawings);
+    } catch {}
+  }, [drawings, symbol, interval]);
 
   // Order book liquidity panel — only while open; never touches chart bars
   useEffect(() => {
@@ -517,7 +554,7 @@ export default function App() {
       const { bars: data, source } = await fetchOHLCV(sym, binanceInterval, 500);
       setBars(data);
       setDataSource(source);
-      writeParams(sym, tf);
+      writeParams(sym, tf, undefined);
       const last = data[data.length - 1];
       const prev = data[data.length - 2];
       const chg = prev ? ((last.close / prev.close - 1) * 100).toFixed(2) : "0.00";
@@ -858,7 +895,33 @@ export default function App() {
         </div>
 
         
-                        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                                <button
+          type="button"
+          className="interval-btn"
+          title="Copy shareable chart link"
+          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+          onClick={async () => {
+            const url = writeParams(symbol, interval, drawings);
+            try {
+              await navigator.clipboard.writeText(url);
+              setShareHint("Link copied");
+            } catch {
+              try {
+                window.prompt("Copy link:", url);
+                setShareHint("Copy the link");
+              } catch {
+                setShareHint("Share failed");
+              }
+            }
+            window.setTimeout(function () {
+              setShareHint("");
+            }, 2000);
+          }}
+        >
+          {shareHint || "Share"}
+        </button>
+
+<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (alertsOn ? " active" : "")}

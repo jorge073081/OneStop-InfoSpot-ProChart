@@ -999,7 +999,19 @@ export default function CandleChart({
       (drawingsRef.current || []).forEach((d) => applyDrawing(d, s));
     } else {
       // Safe live update that preserves trailing future whitespace slots
+      // and keeps the user's pan/zoom (do not fitContent on every tick)
+      let prevRange = null;
+      try {
+        prevRange = s.priceChart.timeScale().getVisibleLogicalRange();
+      } catch (_) {}
+
       s.candle.setData(buildPaddedCandles(bars));
+
+      if (prevRange) {
+        try {
+          s.priceChart.timeScale().setVisibleLogicalRange(prevRange);
+        } catch (_) {}
+      }
 
       const last = bars[bars.length - 1];
       try {

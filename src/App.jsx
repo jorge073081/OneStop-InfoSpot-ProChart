@@ -397,60 +397,80 @@ function toFuturesSymbol(symbol) {
 
 async function fetchFundingRate(symbol) {
   const sym = toFuturesSymbol(symbol);
-  const errors = [];
 
-  // Binance USDT-M futures (public, no key)
+  // Prefer same-origin Vercel proxy (avoids browser CORS)
   try {
-    const url =
-      "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" +
-      encodeURIComponent(sym);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Binance " + res.status);
+    const res = await fetch(
+      "/api/funding?symbol=" + encodeURIComponent(sym)
+    );
+    if (res.status === 404) {
+      throw new Error("API not deployed");
+    }
     const data = await res.json();
-    const rate = parseFloat(data.lastFundingRate);
-    const mark = parseFloat(data.markPrice);
-    const next = data.nextFundingTime ? Number(data.nextFundingTime) : null;
-    if (!Number.isFinite(rate)) throw new Error("No funding field");
-    return {
-      symbol: sym,
-      rate,
-      ratePct: rate * 100,
-      mark: Number.isFinite(mark) ? mark : null,
-      nextFundingTime: next,
-      source: "Binance Futures",
-    };
-  } catch (e) {
-    errors.push("Binance: " + (e.message || e));
+    if (!res.ok) {
+      throw new Error(
+        (data && data.error) ||
+          "Funding API " + res.status
+      );
+    }
+    if (data && typeof data.ratePct === "number") return data;
+    if (data && typeof data.rate === "number") {
+      return { ...data, ratePct: data.rate * 100 };
+    }
+    throw new Error("Bad funding payload");
+  } catch (proxyErr) {
+    // Direct public endpoints (may fail CORS in browser)
+    const errors = [proxyErr.message || String(proxyErr)];
+    try {
+      const res = await fetch(
+        "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" +
+          encodeURIComponent(sym)
+      );
+      if (!res.ok) throw new Error("Binance " + res.status);
+      const data = await res.json();
+      const rate = parseFloat(data.lastFundingRate);
+      if (!Number.isFinite(rate)) throw new Error("Binance no rate");
+      return {
+        symbol: sym,
+        rate,
+        ratePct: rate * 100,
+        mark: parseFloat(data.markPrice) || null,
+        nextFundingTime: data.nextFundingTime
+          ? Number(data.nextFundingTime)
+          : null,
+        source: "Binance Futures",
+      };
+    } catch (e) {
+      errors.push(e.message || String(e));
+    }
+    try {
+      const res = await fetch(
+        "https://api.bybit.com/v5/market/tickers?category=linear&symbol=" +
+          encodeURIComponent(sym)
+      );
+      if (!res.ok) throw new Error("Bybit " + res.status);
+      const data = await res.json();
+      const row = data && data.result && data.result.list && data.result.list[0];
+      if (!row) throw new Error("Bybit empty");
+      const rate = parseFloat(row.fundingRate);
+      if (!Number.isFinite(rate)) throw new Error("Bybit no rate");
+      return {
+        symbol: sym,
+        rate,
+        ratePct: rate * 100,
+        mark: parseFloat(row.markPrice) || null,
+        nextFundingTime: row.nextFundingTime
+          ? Number(row.nextFundingTime)
+          : null,
+        source: "Bybit",
+      };
+    } catch (e) {
+      errors.push(e.message || String(e));
+    }
+    throw new Error(errors.join(" · "));
   }
-
-  // Bybit linear (public)
-  try {
-    const url =
-      "https://api.bybit.com/v5/market/tickers?category=linear&symbol=" +
-      encodeURIComponent(sym);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Bybit " + res.status);
-    const data = await res.json();
-    const row = data && data.result && data.result.list && data.result.list[0];
-    if (!row) throw new Error("Empty Bybit ticker");
-    const rate = parseFloat(row.fundingRate);
-    const mark = parseFloat(row.markPrice);
-    const next = row.nextFundingTime ? Number(row.nextFundingTime) : null;
-    if (!Number.isFinite(rate)) throw new Error("No Bybit funding");
-    return {
-      symbol: sym,
-      rate,
-      ratePct: rate * 100,
-      mark: Number.isFinite(mark) ? mark : null,
-      nextFundingTime: next,
-      source: "Bybit",
-    };
-  } catch (e) {
-    errors.push("Bybit: " + (e.message || e));
-  }
-
-  throw new Error(errors.join(" · ") || "Funding unavailable");
 }
+
 
 
 export default function App() {

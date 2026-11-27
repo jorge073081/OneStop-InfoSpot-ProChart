@@ -540,6 +540,119 @@ function buildSessionMarkers(bars, interval) {
 
 
 /** Comprehensive technical readout from loaded OHLCV only (no paid data). Not a guarantee of future price. */
+
+function baseAsset(symbol) {
+  let s = String(symbol || "").toUpperCase().replace(/\s+/g, "");
+  s = s.replace("-USD", "").replace("-USDT", "").replace("USDT", "").replace("USD", "");
+  return s || "BTC";
+}
+
+/** Free market context: Binance.US 24h + CoinGecko mcap when available. Fail soft. */
+async function fetchMarketContext(symbol) {
+  const base = baseAsset(symbol);
+  const futuresSym = base.endsWith("USDT") ? base : base + "USDT";
+  const out = {
+    base: base,
+    price: null,
+    change24h: null,
+    volume24h: null,
+    high24h: null,
+    low24h: null,
+    marketCap: null,
+    rank: null,
+    cgName: null,
+    source: [],
+    notes: [],
+  };
+
+  // Exchange 24h (accurate, free)
+  try {
+    const res = await fetch(
+      "https://api.binance.us/api/v3/ticker/24hr?symbol=" +
+        encodeURIComponent(futuresSym)
+    );
+    if (res.ok) {
+      const t = await res.json();
+      out.price = parseFloat(t.lastPrice);
+      out.change24h = parseFloat(t.priceChangePercent);
+      out.volume24h = parseFloat(t.quoteVolume); // USDT volume
+      out.high24h = parseFloat(t.highPrice);
+      out.low24h = parseFloat(t.lowPrice);
+      out.source.push("Binance.US 24h");
+    } else {
+      out.notes.push("Binance.US ticker " + res.status);
+    }
+  } catch (e) {
+    out.notes.push("Binance.US unavailable");
+  }
+
+  // CoinGecko — mcap / rank (public, rate-limited; may fail CORS or 429)
+  try {
+    const q = await fetch(
+      "https://api.coingecko.com/api/v3/search?query=" + encodeURIComponent(base)
+    );
+    if (q.ok) {
+      const sj = await q.json();
+      const coins = (sj && sj.coins) || [];
+      const hit =
+        coins.find(function (c) {
+          return String(c.symbol || "").toUpperCase() === base;
+        }) || coins[0];
+      if (hit && hit.id) {
+        out.cgName = hit.name || null;
+        const m = await fetch(
+          "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=" +
+            encodeURIComponent(hit.id) +
+            "&sparkline=false"
+        );
+        if (m.ok) {
+          const arr = await m.json();
+          const row = arr && arr[0];
+          if (row) {
+            if (out.price == null && row.current_price != null)
+              out.price = row.current_price;
+            if (out.change24h == null && row.price_change_percentage_24h != null)
+              out.change24h = row.price_change_percentage_24h;
+            out.marketCap = row.market_cap != null ? row.market_cap : null;
+            out.rank = row.market_cap_rank != null ? row.market_cap_rank : null;
+            if (row.total_volume != null && out.volume24h == null)
+              out.volume24h = row.total_volume;
+            out.source.push("CoinGecko");
+          }
+        } else {
+          out.notes.push("CoinGecko markets " + m.status);
+        }
+      }
+    } else {
+      out.notes.push("CoinGecko search " + q.status);
+    }
+  } catch (e) {
+    out.notes.push("CoinGecko unavailable (CORS/rate limit)");
+  }
+
+  // Honest liquidity band from 24h quote volume when present
+  if (out.volume24h != null && Number.isFinite(out.volume24h)) {
+    if (out.volume24h >= 5e8) out.liquidity = "High liquidity (24h)";
+    else if (out.volume24h >= 5e7) out.liquidity = "Medium liquidity (24h)";
+    else if (out.volume24h >= 5e6) out.liquidity = "Lower liquidity (24h)";
+    else out.liquidity = "Thin liquidity (24h)";
+  } else {
+    out.liquidity = null;
+  }
+
+  return out;
+}
+
+function formatUsd(n) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n >= 1e12) return "$" + (n / 1e12).toFixed(2) + "T";
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+  return "$" + n.toFixed(2);
+}
+
+
 function analyzeChart(bars, symbol) {
   if (!bars || bars.length < 30) {
     return {
@@ -833,6 +946,8 @@ export default function App() {
   const [showFunding, setShowFunding] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [marketCtx, setMarketCtx] = useState(null);
+  const [marketCtxStatus, setMarketCtxStatus] = useState("");
   const [funding, setFunding] = useState(null);
   const [fundingStatus, setFundingStatus] = useState("");
   const [alertsOn, setAlertsOn] = useState(() => {
@@ -1084,6 +1199,35 @@ export default function App() {
       if (timer != null) window.clearInterval(timer);
     };
   }, [showFunding, symbol]);
+
+  // Market context for Analysis panel — free sources only; never touches chart bars
+  useEffect(() => {
+    if (!showAnalysis) return undefined;
+    let cancelled = false;
+    setMarketCtxStatus("Loading market context...");
+    (async () => {
+      try {
+        const ctx = await fetchMarketContext(symbol);
+        if (cancelled) return;
+        setMarketCtx(ctx);
+        setMarketCtxStatus(
+          ((ctx.source && ctx.source.length && ctx.source.join(" + ")) ||
+            "Limited data") +
+            " · " +
+            new Date().toLocaleTimeString()
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setMarketCtx(null);
+          setMarketCtxStatus(e.message || "Context unavailable");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showAnalysis, symbol]);
+
 
 
 
@@ -1567,7 +1711,7 @@ export default function App() {
           <button
             type="button"
             className={"interval-btn" + (showAnalysis ? " active" : "")}
-            title="Technical chart analysis"
+            title="Technical + market context analysis"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}
             onClick={() => {
               setShowAnalysis((v) => !v);
@@ -1670,6 +1814,83 @@ export default function App() {
               </div>
               <div
                 style={{
+                  marginTop: 12,
+                  paddingTop: 8,
+                  borderTop: "1px solid rgba(148,163,184,0.15)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.65rem",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "#6b7c93",
+                    marginBottom: 6,
+                  }}
+                >
+                  Market context
+                </div>
+                {!marketCtx ? (
+                  <div style={{ color: "#8b9bb4" }}>
+                    {marketCtxStatus || "Loading..."}
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 5 }}>
+                    {marketCtx.cgName ? (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#8b9bb4" }}>Name</span>
+                        <span>{marketCtx.cgName}</span>
+                      </div>
+                    ) : null}
+                    {marketCtx.rank != null ? (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#8b9bb4" }}>MCap rank</span>
+                        <span>#{marketCtx.rank}</span>
+                      </div>
+                    ) : null}
+                    {marketCtx.marketCap != null ? (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#8b9bb4" }}>Market cap</span>
+                        <span>{formatUsd(marketCtx.marketCap)}</span>
+                      </div>
+                    ) : null}
+                    {marketCtx.volume24h != null ? (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#8b9bb4" }}>24h volume</span>
+                        <span>{formatUsd(marketCtx.volume24h)}</span>
+                      </div>
+                    ) : null}
+                    {marketCtx.change24h != null ? (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#8b9bb4" }}>24h change</span>
+                        <span
+                          style={{
+                            color: marketCtx.change24h >= 0 ? "#4ade80" : "#f87171",
+                          }}
+                        >
+                          {(marketCtx.change24h >= 0 ? "+" : "") +
+                            marketCtx.change24h.toFixed(2)}
+                          %
+                        </span>
+                      </div>
+                    ) : null}
+                    {marketCtx.liquidity ? (
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#8b9bb4" }}>Liquidity</span>
+                        <span>{marketCtx.liquidity}</span>
+                      </div>
+                    ) : null}
+                    <div style={{ fontSize: "0.62rem", color: "#6b7c93", marginTop: 4 }}>
+                      {marketCtxStatus}
+                      {marketCtx.notes && marketCtx.notes.length
+                        ? " · " + marketCtx.notes.join(" · ")
+                        : ""}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
                   marginTop: 10,
                   paddingTop: 8,
                   borderTop: "1px solid rgba(148,163,184,0.12)",
@@ -1678,8 +1899,9 @@ export default function App() {
                   lineHeight: 1.35,
                 }}
               >
-                Uses your loaded candles only (trend, RSI, momentum, volume, structure).
-                Not financial advice and not a guaranteed prediction of future price.
+                Technical = your chart candles. Context = free public market stats when
+                available (not full fundamental research). Not financial advice and not a
+                prediction of future price.
               </div>
             </div>
           ) : null}

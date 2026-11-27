@@ -1003,7 +1003,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">OneStop-InfoSpot ProChart</div>
+        <div className="brand">ProChart</div>
 
         <form className="symbol-form" onSubmit={onSubmit}>
           <input

@@ -349,7 +349,7 @@ function bookHeatRows(book) {
 
 function isBtcSymbol(symbol) {
   const s = String(symbol || "").toUpperCase();
-  return s === "BTCUSDT" || s === "BTC-USD" || s === "BTCUSD" || s.startsWith("BTC");
+  return s === "BTCUSDT" || s === "BTC-USD" || s === "BTCUSD" || s === "BTC";
 }
 
 /** Align asset & BTC bars by time; return relative strength stats (accurate price math). */
@@ -578,6 +578,58 @@ export default function App() {
       } catch (_) {}
     });
   }, [bars, drawings, alertsOn, symbol]);
+
+  // vs BTC — fetch BTC same TF; compare to chart bars (does not clear chart)
+  useEffect(() => {
+    if (!showVsBtc) return undefined;
+
+    if (isBtcSymbol(symbol)) {
+      setVsBtc(null);
+      setVsBtcStatus("This chart is already BTC");
+      return undefined;
+    }
+
+    let cancelled = false;
+    setVsBtcStatus("Loading BTC…");
+
+    (async () => {
+      try {
+        const binanceInterval =
+          (INTERVALS.find((i) => i.id === interval) || {}).binance || "1d";
+        const btcRes = await fetchOHLCV("BTCUSDT", binanceInterval, 500);
+        if (cancelled) return;
+
+        let assetBars = bars;
+        if (!assetBars || assetBars.length < 2) {
+          const assetRes = await fetchOHLCV(symbol, binanceInterval, 500);
+          if (cancelled) return;
+          assetBars = assetRes.bars;
+        }
+
+        const stats = vsBtcStats(assetBars, btcRes.bars);
+        if (cancelled) return;
+        if (!stats) {
+          setVsBtc(null);
+          setVsBtcStatus("No overlapping candles with BTC");
+          return;
+        }
+        setVsBtc(stats);
+        setVsBtcStatus(
+          (btcRes.source || "exchange") + " · " + stats.points + " matched bars"
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setVsBtc(null);
+          setVsBtcStatus(e.message || "Failed to load BTC");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showVsBtc, symbol, interval, bars]);
+
 
 
   const load = useCallback(async (sym, tf) => {
@@ -1051,8 +1103,9 @@ export default function App() {
                 position: "absolute",
                 top: "calc(100% + 6px)",
                 left: 0,
-                zIndex: 80,
-                width: 200,
+                zIndex: 120,
+                width: 220,
+                minHeight: 72,
                 padding: "8px",
                 borderRadius: 10,
                 border: "1px solid rgba(148,163,184,0.22)",
@@ -1074,7 +1127,9 @@ export default function App() {
                 vs BTC
               </div>
               {!vsBtc ? (
-                <div style={{ color: "#8b9bb4", padding: "4px" }}>{vsBtcStatus || "…"}</div>
+                <div style={{ color: "#8b9bb4", padding: "8px 4px", lineHeight: 1.4 }}>
+                  {vsBtcStatus || "Open this menu to load vs BTC…"}
+                </div>
               ) : (
                 <div style={{ display: "grid", gap: 6, padding: "0 4px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>

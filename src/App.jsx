@@ -2651,7 +2651,7 @@ export default function App() {
             </div>
           ) : null}
 
-          <div className={showMultiTf ? "multi-main" : undefined}>
+          <div className="multi-main">
           {bars.length > 0 ? (
             <CandleChart
               bars={bars}

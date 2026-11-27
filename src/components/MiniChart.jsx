@@ -2,16 +2,16 @@ import { useEffect, useRef } from "react";
 import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 
 /**
- * Read-only mini pane for multi-TF split view.
- * Bars update from parent (live + poll).
+ * Read-only mini pane — preserves visible range across bar refreshes.
  */
 export default function MiniChart({ bars, label }) {
   const ref = useRef(null);
   const chartRef = useRef(null);
+  const fittedRef = useRef(false);
+  const rangeRef = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return;
-
     const el = ref.current;
     const chart = createChart(el, {
       layout: {
@@ -43,6 +43,14 @@ export default function MiniChart({ bars, label }) {
     });
 
     chartRef.current = { chart, series };
+    fittedRef.current = false;
+
+    const saveRange = () => {
+      try {
+        rangeRef.current = chart.timeScale().getVisibleLogicalRange();
+      } catch (_) {}
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(saveRange);
 
     const applySize = () => {
       if (!ref.current || !chartRef.current) return;
@@ -52,10 +60,8 @@ export default function MiniChart({ bars, label }) {
         chartRef.current.chart.applyOptions({ width: w, height: h });
       }
     };
-
     const ro = new ResizeObserver(() => applySize());
     ro.observe(el);
-    // second tick after layout
     const t1 = window.setTimeout(applySize, 50);
     const t2 = window.setTimeout(applySize, 250);
 
@@ -72,6 +78,11 @@ export default function MiniChart({ bars, label }) {
     const s = chartRef.current;
     if (!s || !bars || !bars.length) return;
     try {
+      let prevRange = rangeRef.current;
+      try {
+        prevRange = s.chart.timeScale().getVisibleLogicalRange() || prevRange;
+      } catch (_) {}
+
       s.series.setData(
         bars.map((b) => ({
           time: b.time,
@@ -81,7 +92,16 @@ export default function MiniChart({ bars, label }) {
           close: b.close,
         }))
       );
-      s.chart.timeScale().fitContent();
+
+      if (!fittedRef.current) {
+        s.chart.timeScale().fitContent();
+        fittedRef.current = true;
+      } else if (prevRange) {
+        try {
+          s.chart.timeScale().setVisibleLogicalRange(prevRange);
+        } catch (_) {}
+      }
+
       if (ref.current) {
         const w = ref.current.clientWidth;
         const h = ref.current.clientHeight;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CandleChart from "./components/CandleChart.jsx";
+import MiniChart from "./components/MiniChart.jsx";
 import { fetchOHLCV, toCoinbaseProduct } from "./lib/ohlcv.js";
 import { INTERVALS, displaySymbol, normalizeSymbol } from "./lib/symbols.js";
 
@@ -916,7 +917,21 @@ function analyzeChart(bars, symbol) {
 }
 
 
+function companionIntervals(current) {
+  const map = {
+    "1m": ["15m", "1h"],
+    "5m": ["15m", "1h"],
+    "15m": ["1h", "4h"],
+    "1h": ["15m", "4h"],
+    "4h": ["1h", "1d"],
+    "1d": ["4h", "1w"],
+    "1w": ["1d", "4h"],
+  };
+  return map[current] || ["1h", "4h"];
+}
+
 export default function App() {
+
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
   const [symbol, setSymbol] = useState(initial.symbol);
@@ -946,6 +961,12 @@ export default function App() {
   const [showFunding, setShowFunding] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showMultiTf, setShowMultiTf] = useState(false);
+  const [multiBarsA, setMultiBarsA] = useState([]);
+  const [multiBarsB, setMultiBarsB] = useState([]);
+  const [multiLabelA, setMultiLabelA] = useState("");
+  const [multiLabelB, setMultiLabelB] = useState("");
+  const [multiStatus, setMultiStatus] = useState("");
   const [marketCtx, setMarketCtx] = useState(null);
   const [marketCtxStatus, setMarketCtxStatus] = useState("");
   const [funding, setFunding] = useState(null);
@@ -1227,6 +1248,42 @@ export default function App() {
       cancelled = true;
     };
   }, [showAnalysis, symbol]);
+
+  useEffect(() => {
+    if (!showMultiTf) return undefined;
+    let cancelled = false;
+    const pair = companionIntervals(interval);
+    setMultiLabelA(pair[0].toUpperCase());
+    setMultiLabelB(pair[1].toUpperCase());
+    setMultiStatus("Loading " + pair[0] + " / " + pair[1] + "...");
+
+    (async () => {
+      try {
+        const ia = INTERVALS.find((i) => i.id === pair[0]);
+        const ib = INTERVALS.find((i) => i.id === pair[1]);
+        const [ra, rb] = await Promise.all([
+          fetchOHLCV(symbol, (ia && ia.binance) || pair[0], 300),
+          fetchOHLCV(symbol, (ib && ib.binance) || pair[1], 300),
+        ]);
+        if (cancelled) return;
+        setMultiBarsA(ra.bars || []);
+        setMultiBarsB(rb.bars || []);
+        setMultiStatus("ok");
+      } catch (e) {
+        if (!cancelled) {
+          setMultiBarsA([]);
+          setMultiBarsB([]);
+          setMultiStatus(e.message || "Multi-TF load failed");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showMultiTf, symbol, interval]);
+
+
 
 
 
@@ -1707,7 +1764,17 @@ export default function App() {
           ) : null}
         </div>
 
-                                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                                        <button
+          type="button"
+          className={"interval-btn" + (showMultiTf ? " active" : "")}
+          title="Multi-timeframe split view"
+          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+          onClick={() => setShowMultiTf((v) => !v)}
+        >
+          Multi-TF
+        </button>
+
+<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (showAnalysis ? " active" : "")}
@@ -2461,7 +2528,7 @@ export default function App() {
           </button>
         </aside>
 
-        <main className="chart-wrap">
+        <main className={"chart-wrap" + (showMultiTf ? " multi-tf" : "")}>
           {drawTool !== "none" ? (
             <div className="draw-banner">
               <span>
@@ -2506,6 +2573,7 @@ export default function App() {
             </div>
           ) : null}
 
+          <div className={showMultiTf ? "multi-main" : undefined}>
           {bars.length > 0 ? (
             <CandleChart
               bars={bars}
@@ -2531,6 +2599,13 @@ export default function App() {
               {error || "No data"}
             </div>
           )}
+          </div>
+          {showMultiTf ? (
+            <>
+              <MiniChart bars={multiBarsA} label={(multiLabelA || "TF-A") + (multiStatus ? " · " + multiStatus : "")} />
+              <MiniChart bars={multiBarsB} label={multiLabelB || "TF-B"} />
+            </>
+          ) : null}
         </main>
       </div>
 

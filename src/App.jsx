@@ -346,6 +346,46 @@ function bookHeatRows(book) {
 }
 
 
+
+function isBtcSymbol(symbol) {
+  const s = String(symbol || "").toUpperCase();
+  return s === "BTCUSDT" || s === "BTC-USD" || s === "BTCUSD" || s.startsWith("BTC");
+}
+
+/** Align asset & BTC bars by time; return relative strength stats (accurate price math). */
+function vsBtcStats(assetBars, btcBars) {
+  if (!assetBars?.length || !btcBars?.length) return null;
+  const btcMap = new Map(btcBars.map((b) => [b.time, b.close]));
+  const pairs = [];
+  for (let i = 0; i < assetBars.length; i++) {
+    const c = btcMap.get(assetBars[i].time);
+    if (c != null && c > 0 && assetBars[i].close > 0) {
+      pairs.push({
+        time: assetBars[i].time,
+        asset: assetBars[i].close,
+        btc: c,
+        ratio: assetBars[i].close / c,
+      });
+    }
+  }
+  if (pairs.length < 2) return null;
+  const first = pairs[0];
+  const last = pairs[pairs.length - 1];
+  const assetPct = ((last.asset / first.asset) - 1) * 100;
+  const btcPct = ((last.btc / first.btc) - 1) * 100;
+  const rel = assetPct - btcPct;
+  const ratioPct = ((last.ratio / first.ratio) - 1) * 100;
+  return {
+    ratio: last.ratio,
+    assetPct,
+    btcPct,
+    rel,
+    ratioPct,
+    points: pairs.length,
+  };
+}
+
+
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
@@ -370,6 +410,9 @@ export default function App() {
   const [showLiq, setShowLiq] = useState(false);
   const [book, setBook] = useState(null);
   const [bookStatus, setBookStatus] = useState("");
+  const [showVsBtc, setShowVsBtc] = useState(false);
+  const [vsBtc, setVsBtc] = useState(null);
+  const [vsBtcStatus, setVsBtcStatus] = useState("");
   const [alertsOn, setAlertsOn] = useState(() => {
     try {
       return localStorage.getItem("chart_desk_alerts_on") === "1";
@@ -817,6 +860,7 @@ export default function App() {
               if (!showIndBox) {
                 setShowWatch(false);
                 setShowLiq(false);
+                setShowVsBtc(false);
               }
             }}
             title="Indicators"
@@ -984,6 +1028,116 @@ export default function App() {
           ) : null}
         </div>
 
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showVsBtc ? " active" : "")}
+            title="vs BTC relative strength"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={() => {
+              setShowVsBtc((v) => !v);
+              if (!showVsBtc) {
+                setShowIndBox(false);
+                setShowWatch(false);
+                setShowLiq(false);
+              }
+            }}
+          >
+            vs BTC
+          </button>
+          {showVsBtc ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                zIndex: 80,
+                width: 200,
+                padding: "8px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                fontSize: "0.72rem",
+                color: "#c5d0e0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 4px 8px",
+                }}
+              >
+                vs BTC
+              </div>
+              {!vsBtc ? (
+                <div style={{ color: "#8b9bb4", padding: "4px" }}>{vsBtcStatus || "…"}</div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, padding: "0 4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Ratio</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {vsBtc.ratio < 0.0001
+                        ? vsBtc.ratio.toExponential(3)
+                        : vsBtc.ratio.toPrecision(5)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Asset</span>
+                    <span
+                      style={{
+                        color: vsBtc.assetPct >= 0 ? "#4ade80" : "#f87171",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {(vsBtc.assetPct >= 0 ? "+" : "") + vsBtc.assetPct.toFixed(2)}%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>BTC</span>
+                    <span
+                      style={{
+                        color: vsBtc.btcPct >= 0 ? "#4ade80" : "#f87171",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {(vsBtc.btcPct >= 0 ? "+" : "") + vsBtc.btcPct.toFixed(2)}%
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginTop: 4,
+                      paddingTop: 6,
+                      borderTop: "1px solid rgba(148,163,184,0.12)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>Relative</span>
+                    <span
+                      style={{
+                        color: vsBtc.rel >= 0 ? "#22d3ee" : "#fbbf24",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {(vsBtc.rel >= 0 ? "+" : "") + vsBtc.rel.toFixed(2)}%
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "0.62rem", color: "#6b7c93", marginTop: 4 }}>
+                    Same window as chart · ratio Δ{" "}
+                    {(vsBtc.ratioPct >= 0 ? "+" : "") + vsBtc.ratioPct.toFixed(2)}%
+                    {vsBtcStatus ? " · " + vsBtcStatus : ""}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
 <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
@@ -993,6 +1147,7 @@ export default function App() {
               if (!showLiq) {
                 setShowIndBox(false);
                 setShowWatch(false);
+                setShowVsBtc(false);
               }
             }}
             title="Order book liquidity heatmap"
@@ -1142,6 +1297,7 @@ export default function App() {
               if (!showWatch) {
                 setShowIndBox(false);
                 setShowLiq(false);
+                setShowVsBtc(false);
               }
             }}
             title="Watchlist"

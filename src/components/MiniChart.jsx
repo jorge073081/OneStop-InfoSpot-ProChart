@@ -3,16 +3,17 @@ import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 
 /**
  * Read-only mini pane for multi-TF split view.
- * No drawings / no live WS — parent passes bars.
+ * Bars update from parent (live + poll).
  */
-export default function MiniChart({ bars, label, height }) {
+export default function MiniChart({ bars, label }) {
   const ref = useRef(null);
   const chartRef = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return;
 
-    const chart = createChart(ref.current, {
+    const el = ref.current;
+    const chart = createChart(el, {
       layout: {
         background: { type: ColorType.Solid, color: "#12161c" },
         textColor: "#8b9bb4",
@@ -24,9 +25,13 @@ export default function MiniChart({ bars, label, height }) {
       },
       crosshair: { mode: CrosshairMode.Magnet },
       rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false },
-      width: ref.current.clientWidth,
-      height: height || ref.current.clientHeight || 160,
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width: Math.max(el.clientWidth || 200, 100),
+      height: Math.max(el.clientHeight || 160, 120),
     });
 
     const series = chart.addCandlestickSeries({
@@ -39,21 +44,29 @@ export default function MiniChart({ bars, label, height }) {
 
     chartRef.current = { chart, series };
 
-    const ro = new ResizeObserver(() => {
+    const applySize = () => {
       if (!ref.current || !chartRef.current) return;
-      chart.applyOptions({
-        width: ref.current.clientWidth,
-        height: ref.current.clientHeight || height || 160,
-      });
-    });
-    ro.observe(ref.current);
+      const w = ref.current.clientWidth;
+      const h = ref.current.clientHeight;
+      if (w > 0 && h > 0) {
+        chartRef.current.chart.applyOptions({ width: w, height: h });
+      }
+    };
+
+    const ro = new ResizeObserver(() => applySize());
+    ro.observe(el);
+    // second tick after layout
+    const t1 = window.setTimeout(applySize, 50);
+    const t2 = window.setTimeout(applySize, 250);
 
     return () => {
       ro.disconnect();
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
       chart.remove();
       chartRef.current = null;
     };
-  }, [height]);
+  }, []);
 
   useEffect(() => {
     const s = chartRef.current;
@@ -69,12 +82,17 @@ export default function MiniChart({ bars, label, height }) {
         }))
       );
       s.chart.timeScale().fitContent();
+      if (ref.current) {
+        const w = ref.current.clientWidth;
+        const h = ref.current.clientHeight;
+        if (w > 0 && h > 0) s.chart.applyOptions({ width: w, height: h });
+      }
     } catch (_) {}
   }, [bars]);
 
   return (
     <div className="mini-tf-pane">
-      <div className="mini-tf-label">{label}</div>
+      <div className="mini-tf-label">{label || "TF"}</div>
       <div className="mini-tf-el" ref={ref} />
     </div>
   );

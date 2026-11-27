@@ -386,6 +386,73 @@ function vsBtcStats(assetBars, btcBars) {
 }
 
 
+
+function toFuturesSymbol(symbol) {
+  let s = String(symbol || "BTCUSDT").toUpperCase().replace(/\s+/g, "");
+  if (s.endsWith("-USD")) s = s.replace("-USD", "USDT");
+  if (s.endsWith("-USDT")) s = s.replace("-USDT", "USDT");
+  if (!s.endsWith("USDT")) s = s + "USDT";
+  return s;
+}
+
+async function fetchFundingRate(symbol) {
+  const sym = toFuturesSymbol(symbol);
+  const errors = [];
+
+  // Binance USDT-M futures (public, no key)
+  try {
+    const url =
+      "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=" +
+      encodeURIComponent(sym);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Binance " + res.status);
+    const data = await res.json();
+    const rate = parseFloat(data.lastFundingRate);
+    const mark = parseFloat(data.markPrice);
+    const next = data.nextFundingTime ? Number(data.nextFundingTime) : null;
+    if (!Number.isFinite(rate)) throw new Error("No funding field");
+    return {
+      symbol: sym,
+      rate,
+      ratePct: rate * 100,
+      mark: Number.isFinite(mark) ? mark : null,
+      nextFundingTime: next,
+      source: "Binance Futures",
+    };
+  } catch (e) {
+    errors.push("Binance: " + (e.message || e));
+  }
+
+  // Bybit linear (public)
+  try {
+    const url =
+      "https://api.bybit.com/v5/market/tickers?category=linear&symbol=" +
+      encodeURIComponent(sym);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Bybit " + res.status);
+    const data = await res.json();
+    const row = data && data.result && data.result.list && data.result.list[0];
+    if (!row) throw new Error("Empty Bybit ticker");
+    const rate = parseFloat(row.fundingRate);
+    const mark = parseFloat(row.markPrice);
+    const next = row.nextFundingTime ? Number(row.nextFundingTime) : null;
+    if (!Number.isFinite(rate)) throw new Error("No Bybit funding");
+    return {
+      symbol: sym,
+      rate,
+      ratePct: rate * 100,
+      mark: Number.isFinite(mark) ? mark : null,
+      nextFundingTime: next,
+      source: "Bybit",
+    };
+  } catch (e) {
+    errors.push("Bybit: " + (e.message || e));
+  }
+
+  throw new Error(errors.join(" · ") || "Funding unavailable");
+}
+
+
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
@@ -413,6 +480,9 @@ export default function App() {
   const [showVsBtc, setShowVsBtc] = useState(false);
   const [vsBtc, setVsBtc] = useState(null);
   const [vsBtcStatus, setVsBtcStatus] = useState("");
+  const [showFunding, setShowFunding] = useState(false);
+  const [funding, setFunding] = useState(null);
+  const [fundingStatus, setFundingStatus] = useState("");
   const [alertsOn, setAlertsOn] = useState(() => {
     try {
       return localStorage.getItem("chart_desk_alerts_on") === "1";
@@ -629,6 +699,41 @@ export default function App() {
       cancelled = true;
     };
   }, [showVsBtc, symbol, interval, bars]);
+
+  // Funding rate panel — public futures APIs; never touches chart bars
+  useEffect(() => {
+    if (!showFunding) return undefined;
+    let cancelled = false;
+    let timer = null;
+
+    const run = async (isInitial) => {
+      if (cancelled) return;
+      if (isInitial) setFundingStatus("Loading funding...");
+      try {
+        const data = await fetchFundingRate(symbol);
+        if (cancelled) return;
+        setFunding(data);
+        setFundingStatus(data.source + " · " + new Date().toLocaleTimeString());
+      } catch (e) {
+        if (!cancelled) {
+          setFunding(null);
+          setFundingStatus(e.message || "Funding unavailable");
+        }
+      }
+    };
+
+    run(true);
+    timer = window.setInterval(function () {
+      run(false);
+    }, 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearInterval(timer);
+    };
+  }, [showFunding, symbol]);
+
+
 
 
 
@@ -913,6 +1018,7 @@ export default function App() {
                 setShowWatch(false);
                 setShowLiq(false);
                 setShowVsBtc(false);
+                setShowFunding(false);
               }
             }}
             title="Indicators"
@@ -1080,7 +1186,104 @@ export default function App() {
           ) : null}
         </div>
 
-        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showFunding ? " active" : "")}
+            title="Perp funding rate"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={() => {
+              setShowFunding((v) => !v);
+              if (!showFunding) {
+                setShowIndBox(false);
+                setShowWatch(false);
+                setShowLiq(false);
+                setShowVsBtc(false);
+              }
+            }}
+          >
+            Funding
+          </button>
+          {showFunding ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                zIndex: 120,
+                width: 220,
+                minHeight: 72,
+                padding: "8px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                fontSize: "0.72rem",
+                color: "#c5d0e0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 4px 8px",
+                }}
+              >
+                Funding rate
+              </div>
+              {!funding ? (
+                <div style={{ color: "#8b9bb4", padding: "8px 4px", lineHeight: 1.4 }}>
+                  {fundingStatus || "Loading…"}
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 6, padding: "0 4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Symbol</span>
+                    <span>{funding.symbol}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600 }}>
+                    <span style={{ color: "#8b9bb4" }}>Rate</span>
+                    <span
+                      style={{
+                        color: funding.ratePct >= 0 ? "#4ade80" : "#f87171",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {(funding.ratePct >= 0 ? "+" : "") + funding.ratePct.toFixed(4)}%
+                    </span>
+                  </div>
+                  {funding.mark != null ? (
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "#8b9bb4" }}>Mark</span>
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {funding.mark < 1
+                          ? funding.mark.toPrecision(5)
+                          : funding.mark.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                      </span>
+                    </div>
+                  ) : null}
+                  {funding.nextFundingTime ? (
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "#8b9bb4" }}>Next</span>
+                      <span style={{ fontSize: "0.68rem" }}>
+                        {new Date(funding.nextFundingTime).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  ) : null}
+                  <div style={{ fontSize: "0.62rem", color: "#6b7c93", marginTop: 4 }}>
+                    {fundingStatus}
+                    <br />
+                    Perp funding (not spot). + = longs pay shorts.
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (showVsBtc ? " active" : "")}
@@ -1092,6 +1295,7 @@ export default function App() {
                 setShowIndBox(false);
                 setShowWatch(false);
                 setShowLiq(false);
+                setShowFunding(false);
               }
             }}
           >
@@ -1203,6 +1407,7 @@ export default function App() {
                 setShowIndBox(false);
                 setShowWatch(false);
                 setShowVsBtc(false);
+                setShowFunding(false);
               }
             }}
             title="Order book liquidity heatmap"
@@ -1353,6 +1558,7 @@ export default function App() {
                 setShowIndBox(false);
                 setShowLiq(false);
                 setShowVsBtc(false);
+                setShowFunding(false);
               }
             }}
             title="Watchlist"

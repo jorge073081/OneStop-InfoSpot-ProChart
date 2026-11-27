@@ -917,6 +917,41 @@ function analyzeChart(bars, symbol) {
 }
 
 
+
+/** Apply one trade into an OHLCV series for a given bucket size (live multi-TF). */
+function applyLiveTrade(prevBars, price, tradeSize, tradeTime, bucketSec) {
+  if (!prevBars || !prevBars.length || !bucketSec) return prevBars;
+  if (price == null || !Number.isFinite(price)) return prevBars;
+  const candleStart = Math.floor(tradeTime / bucketSec) * bucketSec;
+  const lastBar = prevBars[prevBars.length - 1];
+  if (candleStart === lastBar.time) {
+    const updated = prevBars.slice();
+    updated[updated.length - 1] = {
+      time: lastBar.time,
+      open: lastBar.open,
+      high: Math.max(lastBar.high, price),
+      low: Math.min(lastBar.low, price),
+      close: price,
+      volume: (lastBar.volume || 0) + (tradeSize || 0),
+    };
+    return updated;
+  }
+  if (candleStart > lastBar.time) {
+    return prevBars.slice(1).concat([
+      {
+        time: candleStart,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        volume: tradeSize || 0,
+      },
+    ]);
+  }
+  return prevBars;
+}
+
+
 function companionIntervals(current) {
   const map = {
     "1m": ["15m", "1h"],
@@ -967,6 +1002,14 @@ export default function App() {
   const [multiLabelA, setMultiLabelA] = useState("");
   const [multiLabelB, setMultiLabelB] = useState("");
   const [multiStatus, setMultiStatus] = useState("");
+  const showMultiTfRef = useRef(false);
+  const multiPairRef = useRef(["1h", "4h"]);
+  useEffect(() => {
+    showMultiTfRef.current = showMultiTf;
+  }, [showMultiTf]);
+  useEffect(() => {
+    multiPairRef.current = companionIntervals(interval);
+  }, [interval]);
   const [marketCtx, setMarketCtx] = useState(null);
   const [marketCtxStatus, setMarketCtxStatus] = useState("");
   const [funding, setFunding] = useState(null);
@@ -1252,12 +1295,14 @@ export default function App() {
   useEffect(() => {
     if (!showMultiTf) return undefined;
     let cancelled = false;
+    let pollTimer = null;
     const pair = companionIntervals(interval);
     setMultiLabelA(pair[0].toUpperCase());
     setMultiLabelB(pair[1].toUpperCase());
-    setMultiStatus("Loading " + pair[0] + " / " + pair[1] + "...");
 
-    (async () => {
+    const loadSide = async (isInitial) => {
+      if (cancelled) return;
+      if (isInitial) setMultiStatus("Loading " + pair[0] + " / " + pair[1] + "...");
       try {
         const ia = INTERVALS.find((i) => i.id === pair[0]);
         const ib = INTERVALS.find((i) => i.id === pair[1]);
@@ -1268,20 +1313,28 @@ export default function App() {
         if (cancelled) return;
         setMultiBarsA(ra.bars || []);
         setMultiBarsB(rb.bars || []);
-        setMultiStatus("ok");
+        setMultiStatus("live");
       } catch (e) {
-        if (!cancelled) {
+        if (!cancelled && isInitial) {
           setMultiBarsA([]);
           setMultiBarsB([]);
           setMultiStatus(e.message || "Multi-TF load failed");
         }
       }
-    })();
+    };
+
+    loadSide(true);
+    // REST refresh keeps side panes honest; tape also patches last bar when on Coinbase
+    pollTimer = window.setInterval(function () {
+      loadSide(false);
+    }, 20 * 1000);
 
     return () => {
       cancelled = true;
+      if (pollTimer != null) window.clearInterval(pollTimer);
     };
   }, [showMultiTf, symbol, interval]);
+
 
 
 
@@ -1438,6 +1491,18 @@ export default function App() {
             }
             return prevBars;
           });
+          // Live multi-TF side panes from same tape
+          if (showMultiTfRef.current) {
+            const pair = multiPairRef.current || [];
+            const secA = INTERVAL_SECONDS[pair[0]] || 3600;
+            const secB = INTERVAL_SECONDS[pair[1]] || 14400;
+            setMultiBarsA((prev) =>
+              applyLiveTrade(prev, price, tradeSize, tradeTime, secA)
+            );
+            setMultiBarsB((prev) =>
+              applyLiveTrade(prev, price, tradeSize, tradeTime, secB)
+            );
+          }
         } catch {}
       };
 
@@ -1490,6 +1555,19 @@ export default function App() {
             }
             return prevBars;
           });
+          if (showMultiTfRef.current) {
+            const pair = multiPairRef.current || [];
+            const tradeTime = liveBar.time;
+            const price = liveBar.close;
+            const secA = INTERVAL_SECONDS[pair[0]] || 3600;
+            const secB = INTERVAL_SECONDS[pair[1]] || 14400;
+            setMultiBarsA((prev) =>
+              applyLiveTrade(prev, price, 0, tradeTime, secA)
+            );
+            setMultiBarsB((prev) =>
+              applyLiveTrade(prev, price, 0, tradeTime, secB)
+            );
+          }
         } catch {}
       };
 

@@ -304,3 +304,38 @@ select {
     min-height: 180px;
   }
 }
+
+/* Multi-asset compare: main | other asset (same TF) */
+.chart-wrap.compare-assets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.chart-wrap.compare-assets > .multi-main {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+}
+
+.chart-wrap.compare-assets > .mini-tf-pane {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  .chart-wrap.compare-assets {
+    display: flex;
+    flex-direction: column;
+  }
+  .chart-wrap.compare-assets > .multi-main {
+    flex: 1 1 auto;
+    min-height: 280px;
+  }
+  .chart-wrap.compare-assets > .mini-tf-pane {
+    flex: 0 0 200px;
+    min-height: 200px;
+  }
+}

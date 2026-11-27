@@ -474,42 +474,68 @@ async function fetchFundingRate(symbol) {
 
 
 
-/** London 08:00 UTC & New York 13:30 UTC session opens as vline overlays (not saved). */
-function buildSessionMarkers(bars) {
+/** London 08:00 UTC & NY 13:30 UTC — intraday only; snapped to real bars (safe on 1D/1W). */
+function buildSessionMarkers(bars, interval) {
   if (!bars || bars.length < 2) return [];
-  const tFirst = bars[0].time;
-  const tLast = bars[bars.length - 1].time;
-  const out = [];
+  // Daily/weekly: session opens are not meaningful as intraday vlines and can crash markers
+  if (interval === "1d" || interval === "1w") return [];
+
+  const times = bars.map(function (b) {
+    return b.time;
+  });
+  const tFirst = times[0];
+  const tLast = times[times.length - 1];
+
+  function nearestBarTime(target) {
+    let best = times[0];
+    let bestD = Math.abs(times[0] - target);
+    for (let i = 1; i < times.length; i++) {
+      const d = Math.abs(times[i] - target);
+      if (d < bestD) {
+        best = times[i];
+        bestD = d;
+      }
+    }
+    // reject if nothing close (avoid bogus markers)
+    const maxDist =
+      interval === "4h" ? 3 * 3600 : interval === "1h" ? 3600 : 15 * 60 * 4;
+    if (bestD > maxDist) return null;
+    return best;
+  }
 
   const d0 = new Date(tFirst * 1000);
-  let day = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()) / 1000;
+  let day =
+    Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()) / 1000;
   const end = tLast + 86400;
+  const out = [];
+  const used = {};
 
-  while (day <= end) {
-    const london = day + 8 * 3600;
-    const ny = day + 13 * 3600 + 30 * 60;
-    if (london >= tFirst - 3600 && london <= tLast + 3600) {
+  while (day <= end && out.length < 80) {
+    const targets = [
+      { id: "sess-lon-" + day, time: day + 8 * 3600, session: "London" },
+      { id: "sess-ny-" + day, time: day + 13 * 3600 + 30 * 60, session: "NY" },
+    ];
+    for (let k = 0; k < targets.length; k++) {
+      const tg = targets[k];
+      if (tg.time < tFirst - 3600 || tg.time > tLast + 3600) continue;
+      const snapped = nearestBarTime(tg.time);
+      if (snapped == null) continue;
+      if (used[snapped]) continue;
+      used[snapped] = true;
       out.push({
-        id: "sess-lon-" + day,
+        id: tg.id,
         type: "vline",
-        time: london,
+        time: snapped,
         price: 0,
-        session: "London",
-      });
-    }
-    if (ny >= tFirst - 3600 && ny <= tLast + 3600) {
-      out.push({
-        id: "sess-ny-" + day,
-        type: "vline",
-        time: ny,
-        price: 0,
-        session: "NY",
+        session: tg.session,
       });
     }
     day += 86400;
   }
   return out;
 }
+
+
 
 
 export default function App() {
@@ -1037,8 +1063,13 @@ export default function App() {
   const last = bars[bars.length - 1];
   const sessionOverlay = useMemo(() => {
     if (!showSessions) return [];
-    return buildSessionMarkers(bars);
-  }, [showSessions, bars]);
+    if (interval === "1d" || interval === "1w") return [];
+    try {
+      return buildSessionMarkers(bars, interval);
+    } catch (_) {
+      return [];
+    }
+  }, [showSessions, bars, interval]);
 
   const prev = bars[bars.length - 2];
   const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
@@ -1254,7 +1285,7 @@ export default function App() {
                         <button
           type="button"
           className={"interval-btn" + (showSessions ? " active" : "")}
-          title="Session markers: London 08:00 UTC, NY 13:30 UTC"
+          title="Session markers (intraday): London 08:00 UTC, NY 13:30 UTC — off on 1D/1W"
           style={{ fontSize: "0.72rem", padding: "4px 10px" }}
           onClick={() => setShowSessions((v) => !v)}
         >

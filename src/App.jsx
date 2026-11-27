@@ -965,6 +965,198 @@ function companionIntervals(current) {
   return map[current] || ["1h", "4h"];
 }
 
+
+/** Spot setup suggestion from loaded bars + optional TF/funding/context. Not financial advice. */
+function buildSpotSetup(bars, alignInfo, funding, marketCtx) {
+  if (!bars || bars.length < 30) {
+    return {
+      ok: false,
+      title: "Need more candles",
+      detail: "Load at least ~30 bars for structure-based levels.",
+      side: null,
+    };
+  }
+
+  const n = bars.length;
+  const last = bars[n - 1];
+  const price = last.close;
+
+  // ATR(14) simple
+  let atrSum = 0;
+  const atrN = Math.min(14, n - 1);
+  for (let i = n - atrN; i < n; i++) {
+    const prev = bars[i - 1];
+    const tr = Math.max(
+      bars[i].high - bars[i].low,
+      Math.abs(bars[i].high - prev.close),
+      Math.abs(bars[i].low - prev.close)
+    );
+    atrSum += tr;
+  }
+  const atr = atrSum / atrN || price * 0.01;
+
+  // Swings: last 20 bars
+  const win = bars.slice(-20);
+  let swingHigh = win[0].high;
+  let swingLow = win[0].low;
+  for (let i = 1; i < win.length; i++) {
+    if (win[i].high > swingHigh) swingHigh = win[i].high;
+    if (win[i].low < swingLow) swingLow = win[i].low;
+  }
+
+  const tech = analyzeChart(bars, "");
+  const score = tech.score || 0;
+
+  // TF alignment tone
+  const tfTone = (alignInfo && alignInfo.tone) || "muted";
+  const tfLabel = (alignInfo && alignInfo.label) || "TF —";
+
+  // Volume
+  let volAvg = 0;
+  const vn = Math.min(20, n);
+  for (let i = n - vn; i < n; i++) volAvg += bars[i].volume || 0;
+  volAvg = volAvg / vn || 1;
+  const volRatio = (last.volume || 0) / volAvg;
+
+  // Funding caution
+  let fundingNote = null;
+  let fundingCaution = false;
+  if (funding && typeof funding.ratePct === "number") {
+    if (funding.ratePct >= 0.05) {
+      fundingCaution = true;
+      fundingNote = "Funding elevated (longs paying) — crowd risk on longs";
+    } else if (funding.ratePct <= -0.05) {
+      fundingCaution = true;
+      fundingNote = "Funding negative (shorts paying) — crowd risk on shorts";
+    } else {
+      fundingNote = "Funding near neutral (" + funding.ratePct.toFixed(4) + "%)";
+    }
+  }
+
+  // Liquidity note from market context
+  let liqNote = null;
+  if (marketCtx && marketCtx.liquidity) {
+    liqNote = marketCtx.liquidity;
+    if (String(marketCtx.liquidity).indexOf("Thin") >= 0) {
+      fundingCaution = true; // reuse flag for size-down
+    }
+  }
+
+  // Decide side
+  let side = null; // "long" | "short" | null
+  let reasons = [];
+
+  if (score >= 2 && tfTone !== "down") {
+    side = "long";
+    reasons.push("Tech score " + score + " (bullish lean)");
+  } else if (score <= -2 && tfTone !== "up") {
+    side = "short";
+    reasons.push("Tech score " + score + " (bearish lean)");
+  } else if (score >= 1.5 && tfTone === "up") {
+    side = "long";
+    reasons.push("Mild tech + TF lean up");
+  } else if (score <= -1.5 && tfTone === "down") {
+    side = "short";
+    reasons.push("Mild tech + TF lean down");
+  } else {
+    return {
+      ok: true,
+      side: null,
+      title: "No clear spot setup",
+      detail:
+        "Mixed or weak confluence. Wait for clearer structure instead of forcing an entry.",
+      price: price,
+      score: score,
+      tfLabel: tfLabel,
+      reasons: [
+        "Tech: " + (tech.bias || "n/a"),
+        "TF: " + tfLabel,
+        volRatio >= 1.2 ? "Volume active" : "Volume quiet",
+      ],
+      fundingNote: fundingNote,
+      liqNote: liqNote,
+      disclaimer: true,
+    };
+  }
+
+  reasons.push("TF: " + tfLabel);
+  if (volRatio >= 1.3) reasons.push("Volume " + volRatio.toFixed(2) + "× avg (supportive)");
+  else if (volRatio < 0.7) reasons.push("Volume light — weaker conviction");
+
+  // Levels
+  let entryLow, entryHigh, stop, t1, t2;
+  if (side === "long") {
+    // Prefer pullback toward swing mid / last low area
+    const pull = Math.max(swingLow, price - atr * 0.8);
+    entryLow = Math.min(pull, price);
+    entryHigh = price;
+    // If extended above mid-range, suggest waiting for dip
+    const mid = (swingHigh + swingLow) / 2;
+    const extended = price > mid + atr * 0.5;
+    if (extended) {
+      entryHigh = Math.min(price, mid + atr * 0.15);
+      entryLow = Math.max(swingLow, mid - atr * 0.4);
+      reasons.push("Price extended — prefer dip into zone, not chase");
+    }
+    stop = Math.min(entryLow, swingLow) - atr * 0.35;
+    const risk = Math.max(price * 0.001, entryHigh - stop);
+    t1 = price + risk * 1.5;
+    t2 = price + risk * 2.5;
+    // Cap target near swing high if close
+    if (swingHigh > price) t1 = Math.min(t1, swingHigh);
+  } else {
+    const push = Math.min(swingHigh, price + atr * 0.8);
+    entryHigh = Math.max(push, price);
+    entryLow = price;
+    const mid = (swingHigh + swingLow) / 2;
+    const extended = price < mid - atr * 0.5;
+    if (extended) {
+      entryLow = Math.max(price, mid - atr * 0.15);
+      entryHigh = Math.min(swingHigh, mid + atr * 0.4);
+      reasons.push("Price extended down — prefer bounce into zone");
+    }
+    stop = Math.max(entryHigh, swingHigh) + atr * 0.35;
+    const risk = Math.max(price * 0.001, stop - entryLow);
+    t1 = price - risk * 1.5;
+    t2 = price - risk * 2.5;
+    if (swingLow < price) t1 = Math.max(t1, swingLow);
+  }
+
+  function fmt(x) {
+    if (x == null || !Number.isFinite(x)) return "—";
+    if (x >= 1000) return x.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    if (x >= 1) return x.toFixed(4);
+    return x.toPrecision(5);
+  }
+
+  const sizeNote = fundingCaution
+    ? "Consider smaller size (funding and/or thin liquidity)."
+    : "Size only what you can risk; levels are structural, not guarantees.";
+
+  return {
+    ok: true,
+    side: side,
+    title: side === "long" ? "Spot long setup (suggestion)" : "Spot short setup (suggestion)",
+    detail: tech.summary || "",
+    price: price,
+    score: score,
+    tfLabel: tfLabel,
+    atr: atr,
+    entryLow: entryLow,
+    entryHigh: entryHigh,
+    stop: stop,
+    t1: t1,
+    t2: t2,
+    fmt: fmt,
+    reasons: reasons,
+    fundingNote: fundingNote,
+    liqNote: liqNote,
+    sizeNote: sizeNote,
+    disclaimer: true,
+  };
+}
+
+
 export default function App() {
 
   const initial = useMemo(() => readParams(), []);
@@ -996,6 +1188,7 @@ export default function App() {
   const [showFunding, setShowFunding] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
   const [showMultiTf, setShowMultiTf] = useState(false);
   const [showCompare, setShowCompare] = useState(false);
   const [compareInput, setCompareInput] = useState("ETH-USD");
@@ -1675,6 +1868,20 @@ export default function App() {
     }
   }, [showAnalysis, bars, symbol]);
 
+  const spotSetup = useMemo(() => {
+    if (!showSetup) return null;
+    try {
+      return buildSpotSetup(bars, alignInfo, funding, marketCtx);
+    } catch (_) {
+      return {
+        ok: false,
+        title: "Setup error",
+        detail: "Could not build levels from this data.",
+        side: null,
+      };
+    }
+  }, [showSetup, bars, alignInfo, funding, marketCtx]);
+
   const prev = bars[bars.length - 2];
   const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
   const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
@@ -1949,6 +2156,143 @@ export default function App() {
           ) : null}
         </div>
 
+
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showSetup ? " active" : "")}
+            title="Spot setup suggestion"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={() => {
+              setShowSetup((v) => !v);
+              if (!showSetup) {
+                setShowIndBox(false);
+                setShowWatch(false);
+                setShowLiq(false);
+                setShowVsBtc(false);
+                setShowFunding(false);
+                setShowAnalysis(false);
+              }
+            }}
+          >
+            Setup
+          </button>
+          {showSetup && spotSetup ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                right: 0,
+                zIndex: 140,
+                width: 300,
+                maxHeight: 420,
+                overflowY: "auto",
+                padding: "10px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                fontSize: "0.72rem",
+                color: "#c5d0e0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  marginBottom: 6,
+                }}
+              >
+                Spot setup
+              </div>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: "0.88rem",
+                  marginBottom: 6,
+                  color:
+                    spotSetup.side === "long"
+                      ? "#4ade80"
+                      : spotSetup.side === "short"
+                        ? "#f87171"
+                        : "#e2e8f0",
+                }}
+              >
+                {spotSetup.title}
+              </div>
+              <div style={{ color: "#94a3b8", marginBottom: 8, lineHeight: 1.35 }}>
+                {spotSetup.detail}
+              </div>
+              {spotSetup.side ? (
+                <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Last</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {spotSetup.fmt(spotSetup.price)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Entry zone</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {spotSetup.fmt(spotSetup.entryLow)} – {spotSetup.fmt(spotSetup.entryHigh)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Stop</span>
+                    <span style={{ color: "#f87171", fontVariantNumeric: "tabular-nums" }}>
+                      {spotSetup.fmt(spotSetup.stop)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Target 1</span>
+                    <span style={{ color: "#4ade80", fontVariantNumeric: "tabular-nums" }}>
+                      {spotSetup.fmt(spotSetup.t1)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#8b9bb4" }}>Target 2</span>
+                    <span style={{ color: "#4ade80", fontVariantNumeric: "tabular-nums" }}>
+                      {spotSetup.fmt(spotSetup.t2)}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+              <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
+                {(spotSetup.reasons || []).map(function (r, i) {
+                  return (
+                    <div key={i} style={{ color: "#94a3b8" }}>
+                      · {r}
+                    </div>
+                  );
+                })}
+                {spotSetup.fundingNote ? (
+                  <div style={{ color: "#fbbf24" }}>· {spotSetup.fundingNote}</div>
+                ) : null}
+                {spotSetup.liqNote ? (
+                  <div style={{ color: "#8b9bb4" }}>· {spotSetup.liqNote}</div>
+                ) : null}
+                {spotSetup.sizeNote ? (
+                  <div style={{ color: "#8b9bb4" }}>· {spotSetup.sizeNote}</div>
+                ) : null}
+              </div>
+              <div
+                style={{
+                  borderTop: "1px solid rgba(148,163,184,0.12)",
+                  paddingTop: 8,
+                  fontSize: "0.62rem",
+                  color: "#6b7c93",
+                  lineHeight: 1.35,
+                }}
+              >
+                Rules-based levels from your chart (structure, ATR, tech score, TF badge).
+                Optional funding/context when already loaded. Not financial advice — not a
+                guaranteed entry or exit.
+              </div>
+            </div>
+          ) : null}
+        </div>
 
 <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button

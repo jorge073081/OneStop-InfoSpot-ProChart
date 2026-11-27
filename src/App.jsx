@@ -238,6 +238,84 @@ const TOOL_GROUPS = [
   ],
 ];
 
+
+async function fetchOrderBook(symbol) {
+  // Coinbase level-2 book (free, no key)
+  const product = (() => {
+    const s = String(symbol || "").toUpperCase();
+    if (s.includes("-")) return s;
+    if (s.endsWith("USDT")) return s.slice(0, -4) + "-USD";
+    return s + "-USD";
+  })();
+  try {
+    const res = await fetch(
+      "https://api.exchange.coinbase.com/products/" +
+        encodeURIComponent(product) +
+        "/book?level=2"
+    );
+    if (!res.ok) throw new Error("Coinbase book " + res.status);
+    const data = await res.json();
+    const bids = (data.bids || []).slice(0, 24).map((r) => ({
+      price: parseFloat(r[0]),
+      size: parseFloat(r[1]),
+    }));
+    const asks = (data.asks || []).slice(0, 24).map((r) => ({
+      price: parseFloat(r[0]),
+      size: parseFloat(r[1]),
+    }));
+    return { bids, asks, source: "coinbase" };
+  } catch (e1) {
+    // Binance.US depth fallback
+    const sym = String(symbol || "BTCUSDT").toUpperCase().replace("-USD", "USDT");
+    const res = await fetch(
+      "https://api.binance.us/api/v3/depth?symbol=" +
+        encodeURIComponent(sym) +
+        "&limit=20"
+    );
+    if (!res.ok) throw new Error("Book unavailable");
+    const data = await res.json();
+    const bids = (data.bids || []).map((r) => ({
+      price: parseFloat(r[0]),
+      size: parseFloat(r[1]),
+    }));
+    const asks = (data.asks || []).map((r) => ({
+      price: parseFloat(r[0]),
+      size: parseFloat(r[1]),
+    }));
+    return { bids, asks, source: "binance" };
+  }
+}
+
+function bookHeatRows(book) {
+  if (!book || !book.bids || !book.asks) return [];
+  const maxSize = Math.max(
+    0.0001,
+    ...book.bids.map((b) => b.size),
+    ...book.asks.map((a) => a.size)
+  );
+  // asks high→low (top), then bids high→low
+  const asks = book.asks
+    .slice()
+    .sort((a, b) => b.price - a.price)
+    .map((a) => ({
+      side: "ask",
+      price: a.price,
+      size: a.size,
+      pct: Math.min(100, (a.size / maxSize) * 100),
+    }));
+  const bids = book.bids
+    .slice()
+    .sort((a, b) => b.price - a.price)
+    .map((b) => ({
+      side: "bid",
+      price: b.price,
+      size: b.size,
+      pct: Math.min(100, (b.size / maxSize) * 100),
+    }));
+  return asks.concat(bids);
+}
+
+
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
@@ -259,6 +337,9 @@ export default function App() {
     }
   });
   const [showWatch, setShowWatch] = useState(false);
+  const [showLiq, setShowLiq] = useState(false);
+  const [book, setBook] = useState(null);
+  const [bookStatus, setBookStatus] = useState("");
 
   useEffect(() => {
     try {
@@ -314,6 +395,35 @@ export default function App() {
       localStorage.setItem(`chart_desk_drawings_${symbol}`, JSON.stringify(drawings));
     } catch {}
   }, [drawings, symbol]);
+
+  // Order book liquidity panel — only while open; never touches chart bars
+  useEffect(() => {
+    if (!showLiq) return undefined;
+    let cancelled = false;
+    let timer = null;
+
+    const run = async () => {
+      if (cancelled) return;
+      try {
+        const data = await fetchOrderBook(symbol);
+        if (cancelled) return;
+        setBook(data);
+        setBookStatus((data.source || "book") + " · " + new Date().toLocaleTimeString());
+      } catch (e) {
+        if (!cancelled) setBookStatus(e.message || "Book unavailable");
+      }
+    };
+
+    run();
+    timer = window.setInterval(function () {
+      run();
+    }, 12 * 1000);
+
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearInterval(timer);
+    };
+  }, [showLiq, symbol]);
 
   const load = useCallback(async (sym, tf) => {
     setStatus("Loading…");
@@ -592,7 +702,10 @@ export default function App() {
             className={"interval-btn" + (showIndBox ? " active" : "")}
             onClick={() => {
               setShowIndBox((v) => !v);
-              if (!showIndBox) setShowWatch(false);
+              if (!showIndBox) {
+                setShowWatch(false);
+                setShowLiq(false);
+              }
             }}
             title="Indicators"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}
@@ -670,7 +783,121 @@ export default function App() {
         </div>
 
         
-        <div
+                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showLiq ? " active" : "")}
+            onClick={() => {
+              setShowLiq((v) => !v);
+              if (!showLiq) {
+                setShowIndBox(false);
+                setShowWatch(false);
+              }
+            }}
+            title="Order book liquidity heatmap"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+          >
+            Liquidity
+          </button>
+          {showLiq ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                zIndex: 80,
+                width: 220,
+                maxHeight: 340,
+                overflowY: "auto",
+                padding: "8px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 4px 6px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>Liquidity</span>
+                <span style={{ textTransform: "none", letterSpacing: 0 }}>{bookStatus}</span>
+              </div>
+              {!book ? (
+                <div style={{ fontSize: "0.72rem", color: "#8b9bb4", padding: 8 }}>
+                  Loading book…
+                </div>
+              ) : (
+                bookHeatRows(book).map((row, i) => (
+                  <div
+                    key={row.side + "-" + row.price + "-" + i}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "64px 1fr 52px",
+                      gap: 6,
+                      alignItems: "center",
+                      marginBottom: 3,
+                      fontSize: "0.68rem",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    <span style={{ color: row.side === "ask" ? "#f87171" : "#4ade80" }}>
+                      {row.price < 1
+                        ? row.price.toPrecision(4)
+                        : row.price.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                    </span>
+                    <div
+                      style={{
+                        height: 8,
+                        borderRadius: 3,
+                        background: "rgba(148,163,184,0.08)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: row.pct + "%",
+                          borderRadius: 3,
+                          background:
+                            row.side === "ask"
+                              ? "linear-gradient(90deg, rgba(239,68,68,0.15), rgba(239,68,68,0.85))"
+                              : "linear-gradient(90deg, rgba(34,197,94,0.15), rgba(34,197,94,0.85))",
+                        }}
+                      />
+                    </div>
+                    <span style={{ color: "#8b9bb4", textAlign: "right" }}>
+                      {row.size >= 1000
+                        ? (row.size / 1000).toFixed(1) + "k"
+                        : row.size < 1
+                          ? row.size.toPrecision(3)
+                          : row.size.toFixed(2)}
+                    </span>
+                  </div>
+                ))
+              )}
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: "0.62rem",
+                  color: "#6b7c93",
+                  padding: "4px 2px 0",
+                }}
+              >
+                Asks (red) · Bids (green) · depth size
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+<div
           className="intervals"
           title={alignInfo.title}
           style={{ alignItems: "center" }}
@@ -711,7 +938,10 @@ export default function App() {
             className={"interval-btn" + (showWatch ? " active" : "")}
             onClick={() => {
               setShowWatch((v) => !v);
-              if (!showWatch) setShowIndBox(false);
+              if (!showWatch) {
+                setShowIndBox(false);
+                setShowLiq(false);
+              }
             }}
             title="Watchlist"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}

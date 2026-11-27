@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CandleChart from "./components/CandleChart.jsx";
 import { fetchOHLCV, toCoinbaseProduct } from "./lib/ohlcv.js";
 import { INTERVALS, displaySymbol, normalizeSymbol } from "./lib/symbols.js";
@@ -340,12 +340,28 @@ export default function App() {
   const [showLiq, setShowLiq] = useState(false);
   const [book, setBook] = useState(null);
   const [bookStatus, setBookStatus] = useState("");
+  const [alertsOn, setAlertsOn] = useState(() => {
+    try {
+      return localStorage.getItem("chart_desk_alerts_on") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [alertLog, setAlertLog] = useState([]);
+  const lastPriceRef = useRef(null);
+  const firedRef = useRef({});
 
   useEffect(() => {
     try {
       localStorage.setItem("chart_desk_watchlist", JSON.stringify(watchlist));
     } catch {}
   }, [watchlist]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("chart_desk_alerts_on", alertsOn ? "1" : "0");
+    } catch {}
+  }, [alertsOn]);
 
   const addToWatchlist = () => {
     const sym = symbol;
@@ -424,6 +440,65 @@ export default function App() {
       if (timer != null) window.clearInterval(timer);
     };
   }, [showLiq, symbol]);
+
+
+  // Price alerts on horizontal drawings — uses live last price; never mutates bars
+  useEffect(() => {
+    if (!alertsOn || !bars.length) return;
+    const price = bars[bars.length - 1].close;
+    if (price == null || !Number.isFinite(price)) return;
+
+    const prev = lastPriceRef.current;
+    lastPriceRef.current = price;
+    if (prev == null || !Number.isFinite(prev) || prev === price) return;
+
+    const levels = drawings.filter(
+      (d) => (d.type === "hline" || d.type === "hline_dot") && Number.isFinite(d.price)
+    );
+    if (!levels.length) return;
+
+    const symLabel = displaySymbol(symbol);
+    const fired = firedRef.current;
+
+    levels.forEach((d) => {
+      const level = d.price;
+      const key = String(d.id || level);
+      // re-arm when price moves away ~0.15% from level
+      const away = Math.abs(price - level) / level > 0.0015;
+      if (away && fired[key]) {
+        delete fired[key];
+      }
+
+      const crossUp = prev < level && price >= level;
+      const crossDown = prev > level && price <= level;
+      if (!crossUp && !crossDown) return;
+      if (fired[key]) return;
+      fired[key] = true;
+
+      const dir = crossUp ? "↑ tag" : "↓ tag";
+      const msg =
+        symLabel +
+        " " +
+        dir +
+        " " +
+        level +
+        " @ " +
+        price;
+      const entry = {
+        id: key + "-" + Date.now(),
+        text: msg,
+        at: new Date().toLocaleTimeString(),
+      };
+      setAlertLog((log) => [entry].concat(log).slice(0, 12));
+
+      try {
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          new Notification("Chart Desk alert", { body: msg, tag: key });
+        }
+      } catch (_) {}
+    });
+  }, [bars, drawings, alertsOn, symbol]);
+
 
   const load = useCallback(async (sym, tf) => {
     setStatus("Loading…");
@@ -783,7 +858,70 @@ export default function App() {
         </div>
 
         
-                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (alertsOn ? " active" : "")}
+            title="Price alerts on horizontal lines"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={async () => {
+              if (!alertsOn) {
+                try {
+                  if (typeof Notification !== "undefined" && Notification.permission === "default") {
+                    await Notification.requestPermission();
+                  }
+                } catch (_) {}
+                firedRef.current = {};
+                lastPriceRef.current = bars.length ? bars[bars.length - 1].close : null;
+                setAlertsOn(true);
+              } else {
+                setAlertsOn(false);
+              }
+            }}
+          >
+            {alertsOn ? "Alerts on" : "Alerts"}
+          </button>
+          {alertsOn && alertLog.length ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                zIndex: 80,
+                width: 220,
+                maxHeight: 200,
+                overflowY: "auto",
+                padding: "8px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                fontSize: "0.68rem",
+                color: "#c5d0e0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 4px 6px",
+                }}
+              >
+                Recent alerts
+              </div>
+              {alertLog.map((a) => (
+                <div key={a.id} style={{ padding: "4px 4px", borderBottom: "1px solid rgba(148,163,184,0.08)" }}>
+                  <div>{a.text}</div>
+                  <div style={{ color: "#6b7c93" }}>{a.at}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (showLiq ? " active" : "")}

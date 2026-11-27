@@ -473,6 +473,45 @@ async function fetchFundingRate(symbol) {
 
 
 
+
+/** London 08:00 UTC & New York 13:30 UTC session opens as vline overlays (not saved). */
+function buildSessionMarkers(bars) {
+  if (!bars || bars.length < 2) return [];
+  const tFirst = bars[0].time;
+  const tLast = bars[bars.length - 1].time;
+  const out = [];
+
+  const d0 = new Date(tFirst * 1000);
+  let day = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()) / 1000;
+  const end = tLast + 86400;
+
+  while (day <= end) {
+    const london = day + 8 * 3600;
+    const ny = day + 13 * 3600 + 30 * 60;
+    if (london >= tFirst - 3600 && london <= tLast + 3600) {
+      out.push({
+        id: "sess-lon-" + day,
+        type: "vline",
+        time: london,
+        price: 0,
+        session: "London",
+      });
+    }
+    if (ny >= tFirst - 3600 && ny <= tLast + 3600) {
+      out.push({
+        id: "sess-ny-" + day,
+        type: "vline",
+        time: ny,
+        price: 0,
+        session: "NY",
+      });
+    }
+    day += 86400;
+  }
+  return out;
+}
+
+
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
@@ -501,6 +540,7 @@ export default function App() {
   const [vsBtc, setVsBtc] = useState(null);
   const [vsBtcStatus, setVsBtcStatus] = useState("");
   const [showFunding, setShowFunding] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
   const [funding, setFunding] = useState(null);
   const [fundingStatus, setFundingStatus] = useState("");
   const [alertsOn, setAlertsOn] = useState(() => {
@@ -995,6 +1035,11 @@ export default function App() {
   };
 
   const last = bars[bars.length - 1];
+  const sessionOverlay = useMemo(() => {
+    if (!showSessions) return [];
+    return buildSessionMarkers(bars);
+  }, [showSessions, bars]);
+
   const prev = bars[bars.length - 2];
   const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
   const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
@@ -1206,7 +1251,17 @@ export default function App() {
           ) : null}
         </div>
 
-                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                        <button
+          type="button"
+          className={"interval-btn" + (showSessions ? " active" : "")}
+          title="Session markers: London 08:00 UTC, NY 13:30 UTC"
+          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+          onClick={() => setShowSessions((v) => !v)}
+        >
+          Sessions
+        </button>
+
+<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (showFunding ? " active" : "")}
@@ -1810,7 +1865,7 @@ export default function App() {
               showStoch={showStoch}
               showAtr={showAtr}
               drawTool={drawTool}
-              drawings={drawings}
+              drawings={showSessions ? drawings.concat(sessionOverlay) : drawings}
               onAddDrawing={(d) => setDrawings((prev) => [...prev, d])}
               trendDraft={trendDraft}
               onTrendDraft={setTrendDraft}

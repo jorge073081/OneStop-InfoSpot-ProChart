@@ -538,6 +538,271 @@ function buildSessionMarkers(bars, interval) {
 
 
 
+
+/** Comprehensive technical readout from loaded OHLCV only (no paid data). Not a guarantee of future price. */
+function analyzeChart(bars, symbol) {
+  if (!bars || bars.length < 30) {
+    return {
+      bias: "Insufficient data",
+      tone: "muted",
+      score: 0,
+      summary: "Need at least ~30 candles for a stable readout.",
+      factors: [],
+    };
+  }
+
+  const n = bars.length;
+  const closes = bars.map(function (b) {
+    return b.close;
+  });
+  const vols = bars.map(function (b) {
+    return b.volume || 0;
+  });
+  const last = bars[n - 1];
+  const prev = bars[n - 2];
+
+  function smaAt(period) {
+    if (n < period) return null;
+    let s = 0;
+    for (let i = n - period; i < n; i++) s += closes[i];
+    return s / period;
+  }
+
+  function rsiVal(period) {
+    period = period || 14;
+    if (n < period + 1) return null;
+    let gains = 0;
+    let losses = 0;
+    for (let i = n - period; i < n; i++) {
+      const d = closes[i] - closes[i - 1];
+      if (d >= 0) gains += d;
+      else losses -= d;
+    }
+    const ag = gains / period;
+    const al = losses / period;
+    if (al === 0) return 100;
+    const rs = ag / al;
+    return 100 - 100 / (1 + rs);
+  }
+
+  const sma20 = smaAt(20);
+  const sma50 = smaAt(50);
+  const sma200 = smaAt(200);
+  const rsi = rsiVal(14);
+
+  // Momentum windows
+  const ret = function (len) {
+    if (n <= len) return null;
+    return ((closes[n - 1] / closes[n - 1 - len]) - 1) * 100;
+  };
+  const r5 = ret(5);
+  const r20 = ret(20);
+
+  // Volume vs avg
+  let volAvg = 0;
+  const volN = Math.min(20, n);
+  for (let i = n - volN; i < n; i++) volAvg += vols[i];
+  volAvg = volAvg / volN || 1;
+  const volRatio = (last.volume || 0) / volAvg;
+
+  // Simple structure: last 10 swing direction
+  const slice = bars.slice(-12);
+  let hh = 0;
+  let hl = 0;
+  let lh = 0;
+  let ll = 0;
+  for (let i = 2; i < slice.length; i++) {
+    if (slice[i].high > slice[i - 1].high && slice[i - 1].high > slice[i - 2].high) hh++;
+    if (slice[i].low > slice[i - 1].low && slice[i - 1].low > slice[i - 2].low) hl++;
+    if (slice[i].high < slice[i - 1].high && slice[i - 1].high < slice[i - 2].high) lh++;
+    if (slice[i].low < slice[i - 1].low && slice[i - 1].low < slice[i - 2].low) ll++;
+  }
+
+  // MACD-ish: EMA12 - EMA26 approx via SMA for stability without full series
+  function emaLast(period) {
+    const k = 2 / (period + 1);
+    let e = closes[0];
+    for (let i = 1; i < n; i++) e = closes[i] * k + e * (1 - k);
+    return e;
+  }
+  const macdLine = emaLast(12) - emaLast(26);
+  // prior macd rough
+  const closesPrior = closes.slice(0, -3);
+  let e12 = closesPrior[0];
+  let e26 = closesPrior[0];
+  const k12 = 2 / 13;
+  const k26 = 2 / 27;
+  for (let i = 1; i < closesPrior.length; i++) {
+    e12 = closesPrior[i] * k12 + e12 * (1 - k12);
+    e26 = closesPrior[i] * k26 + e26 * (1 - k26);
+  }
+  const macdPrior = e12 - e26;
+  const macdRising = macdLine > macdPrior;
+
+  const factors = [];
+  let score = 0; // -10..+10
+
+  // Trend
+  if (sma50 != null) {
+    if (last.close > sma50) {
+      score += 2;
+      factors.push({ name: "Price vs SMA50", detail: "Above — bullish bias", dir: "up" });
+    } else {
+      score -= 2;
+      factors.push({ name: "Price vs SMA50", detail: "Below — bearish bias", dir: "down" });
+    }
+  }
+  if (sma20 != null && sma50 != null) {
+    if (sma20 > sma50) {
+      score += 1;
+      factors.push({ name: "SMA20 / SMA50", detail: "Short MA above long — uptrend stack", dir: "up" });
+    } else {
+      score -= 1;
+      factors.push({ name: "SMA20 / SMA50", detail: "Short MA below long — downtrend stack", dir: "down" });
+    }
+  }
+  if (sma200 != null) {
+    if (last.close > sma200) {
+      score += 1;
+      factors.push({ name: "Price vs SMA200", detail: "Above long-term mean", dir: "up" });
+    } else {
+      score -= 1;
+      factors.push({ name: "Price vs SMA200", detail: "Below long-term mean", dir: "down" });
+    }
+  }
+
+  // RSI
+  if (rsi != null) {
+    if (rsi >= 70) {
+      score -= 1;
+      factors.push({ name: "RSI(14)", detail: rsi.toFixed(1) + " — overbought risk", dir: "down" });
+    } else if (rsi <= 30) {
+      score += 1;
+      factors.push({ name: "RSI(14)", detail: rsi.toFixed(1) + " — oversold bounce zone", dir: "up" });
+    } else if (rsi >= 55) {
+      score += 1;
+      factors.push({ name: "RSI(14)", detail: rsi.toFixed(1) + " — bullish momentum zone", dir: "up" });
+    } else if (rsi <= 45) {
+      score -= 1;
+      factors.push({ name: "RSI(14)", detail: rsi.toFixed(1) + " — bearish momentum zone", dir: "down" });
+    } else {
+      factors.push({ name: "RSI(14)", detail: rsi.toFixed(1) + " — neutral", dir: "flat" });
+    }
+  }
+
+  // Momentum
+  if (r5 != null) {
+    if (r5 > 1) {
+      score += 1;
+      factors.push({ name: "5-bar momentum", detail: (r5 >= 0 ? "+" : "") + r5.toFixed(2) + "%", dir: "up" });
+    } else if (r5 < -1) {
+      score -= 1;
+      factors.push({ name: "5-bar momentum", detail: r5.toFixed(2) + "%", dir: "down" });
+    } else {
+      factors.push({ name: "5-bar momentum", detail: (r5 >= 0 ? "+" : "") + r5.toFixed(2) + "% — flat", dir: "flat" });
+    }
+  }
+  if (r20 != null) {
+    if (r20 > 3) {
+      score += 1;
+      factors.push({ name: "20-bar momentum", detail: "+" + r20.toFixed(2) + "%", dir: "up" });
+    } else if (r20 < -3) {
+      score -= 1;
+      factors.push({ name: "20-bar momentum", detail: r20.toFixed(2) + "%", dir: "down" });
+    } else {
+      factors.push({ name: "20-bar momentum", detail: (r20 >= 0 ? "+" : "") + r20.toFixed(2) + "%", dir: "flat" });
+    }
+  }
+
+  // MACD direction
+  if (macdRising && macdLine > 0) {
+    score += 1;
+    factors.push({ name: "MACD trend", detail: "Positive & rising", dir: "up" });
+  } else if (!macdRising && macdLine < 0) {
+    score -= 1;
+    factors.push({ name: "MACD trend", detail: "Negative & falling", dir: "down" });
+  } else if (macdRising) {
+    factors.push({ name: "MACD trend", detail: "Rising (improving)", dir: "up" });
+    score += 0.5;
+  } else {
+    factors.push({ name: "MACD trend", detail: "Softening", dir: "down" });
+    score -= 0.5;
+  }
+
+  // Volume
+  if (volRatio >= 1.5 && last.close >= last.open) {
+    score += 1;
+    factors.push({ name: "Volume", detail: volRatio.toFixed(2) + "× avg on green bar — demand", dir: "up" });
+  } else if (volRatio >= 1.5 && last.close < last.open) {
+    score -= 1;
+    factors.push({ name: "Volume", detail: volRatio.toFixed(2) + "× avg on red bar — supply", dir: "down" });
+  } else {
+    factors.push({ name: "Volume", detail: volRatio.toFixed(2) + "× 20-bar avg", dir: "flat" });
+  }
+
+  // Structure
+  if (hh + hl > lh + ll + 1) {
+    score += 1;
+    factors.push({ name: "Swing structure", detail: "Higher highs/lows lean", dir: "up" });
+  } else if (lh + ll > hh + hl + 1) {
+    score -= 1;
+    factors.push({ name: "Swing structure", detail: "Lower highs/lows lean", dir: "down" });
+  } else {
+    factors.push({ name: "Swing structure", detail: "Mixed / range-like", dir: "flat" });
+  }
+
+  // Candle
+  const body = last.close - last.open;
+  const range = Math.max(1e-12, last.high - last.low);
+  if (body > 0 && Math.abs(body) / range > 0.6) {
+    score += 0.5;
+    factors.push({ name: "Last candle", detail: "Strong close near highs", dir: "up" });
+  } else if (body < 0 && Math.abs(body) / range > 0.6) {
+    score -= 0.5;
+    factors.push({ name: "Last candle", detail: "Weak close near lows", dir: "down" });
+  }
+
+  score = Math.max(-10, Math.min(10, score));
+  const abs = Math.abs(score);
+  let bias;
+  let tone;
+  let summary;
+  if (score >= 4) {
+    bias = "Bullish bias";
+    tone = "up";
+    summary =
+      "Factors stack toward upside continuation. Still wait for your levels — this is bias, not a guarantee.";
+  } else if (score <= -4) {
+    bias = "Bearish bias";
+    tone = "down";
+    summary =
+      "Factors stack toward downside pressure. Confirmation at structure still matters.";
+  } else if (score >= 1.5) {
+    bias = "Mild bullish";
+    tone = "up";
+    summary = "Slight upside lean; easy to flip — treat as soft bias only.";
+  } else if (score <= -1.5) {
+    bias = "Mild bearish";
+    tone = "down";
+    summary = "Slight downside lean; chop risk is high.";
+  } else {
+    bias = "Neutral / range";
+    tone = "muted";
+    summary = "Mixed signals. Better to wait for break of structure than force a call.";
+  }
+
+  return {
+    bias,
+    tone,
+    score: Math.round(score * 10) / 10,
+    summary,
+    factors,
+    symbol: symbol,
+    last: last.close,
+  };
+}
+
+
 export default function App() {
   const initial = useMemo(() => readParams(), []);
   const [symbolInput, setSymbolInput] = useState(displaySymbol(initial.symbol));
@@ -567,6 +832,7 @@ export default function App() {
   const [vsBtcStatus, setVsBtcStatus] = useState("");
   const [showFunding, setShowFunding] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const [funding, setFunding] = useState(null);
   const [fundingStatus, setFundingStatus] = useState("");
   const [alertsOn, setAlertsOn] = useState(() => {
@@ -1071,6 +1337,21 @@ export default function App() {
     }
   }, [showSessions, bars, interval]);
 
+  const chartAnalysis = useMemo(() => {
+    if (!showAnalysis) return null;
+    try {
+      return analyzeChart(bars, symbol);
+    } catch (_) {
+      return {
+        bias: "Error",
+        tone: "muted",
+        score: 0,
+        summary: "Analysis failed on this dataset.",
+        factors: [],
+      };
+    }
+  }, [showAnalysis, bars, symbol]);
+
   const prev = bars[bars.length - 2];
   const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
   const chgSign = chgPct != null && chgPct >= 0 ? "+" : "";
@@ -1282,7 +1563,129 @@ export default function App() {
           ) : null}
         </div>
 
-                        <button
+                                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showAnalysis ? " active" : "")}
+            title="Technical chart analysis"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={() => {
+              setShowAnalysis((v) => !v);
+              if (!showAnalysis) {
+                setShowIndBox(false);
+                setShowWatch(false);
+                setShowLiq(false);
+                setShowVsBtc(false);
+                setShowFunding(false);
+              }
+            }}
+          >
+            Analysis
+          </button>
+          {showAnalysis && chartAnalysis ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                right: 0,
+                zIndex: 130,
+                width: 280,
+                maxHeight: 360,
+                overflowY: "auto",
+                padding: "10px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                fontSize: "0.72rem",
+                color: "#c5d0e0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  marginBottom: 6,
+                }}
+              >
+                Chart analysis
+              </div>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: "0.9rem",
+                  color:
+                    chartAnalysis.tone === "up"
+                      ? "#4ade80"
+                      : chartAnalysis.tone === "down"
+                        ? "#f87171"
+                        : "#e2e8f0",
+                  marginBottom: 4,
+                }}
+              >
+                {chartAnalysis.bias}{" "}
+                <span style={{ color: "#8b9bb4", fontWeight: 500 }}>
+                  ({chartAnalysis.score > 0 ? "+" : ""}
+                  {chartAnalysis.score})
+                </span>
+              </div>
+              <div style={{ color: "#94a3b8", marginBottom: 8, lineHeight: 1.35 }}>
+                {chartAnalysis.summary}
+              </div>
+              <div style={{ display: "grid", gap: 5 }}>
+                {(chartAnalysis.factors || []).map(function (f, i) {
+                  return (
+                    <div
+                      key={f.name + "-" + i}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "6px 1fr",
+                        gap: 8,
+                        alignItems: "start",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          marginTop: 4,
+                          borderRadius: 99,
+                          background:
+                            f.dir === "up"
+                              ? "#4ade80"
+                              : f.dir === "down"
+                                ? "#f87171"
+                                : "#64748b",
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{f.name}</div>
+                        <div style={{ color: "#8b9bb4" }}>{f.detail}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div
+                style={{
+                  marginTop: 10,
+                  paddingTop: 8,
+                  borderTop: "1px solid rgba(148,163,184,0.12)",
+                  fontSize: "0.62rem",
+                  color: "#6b7c93",
+                  lineHeight: 1.35,
+                }}
+              >
+                Uses your loaded candles only (trend, RSI, momentum, volume, structure).
+                Not financial advice and not a guaranteed prediction of future price.
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+<button
           type="button"
           className={"interval-btn" + (showSessions ? " active" : "")}
           title="Session markers (intraday): London 08:00 UTC, NY 13:30 UTC — off on 1D/1W"

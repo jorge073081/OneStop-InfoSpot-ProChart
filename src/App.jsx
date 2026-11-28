@@ -1267,22 +1267,23 @@ function bookWallLevels(book) {
     .sort(function (a, b) {
       return b.size - a.size;
     })
-    .slice(0, 3);
+    .slice(0, 2);
   const asks = book.asks
     .slice()
     .sort(function (a, b) {
       return b.size - a.size;
     })
-    .slice(0, 3);
+    .slice(0, 2);
   bids.forEach(function (b, i) {
     if (!Number.isFinite(b.price)) return;
     levels.push({
       id: "wall-bid-" + i,
       price: b.price,
-      title: i === 0 ? "Bid wall" : "Bid",
-      color: "#39FF14",
+      title: i === 0 ? "Bid wall" : "",
+      color: i === 0 ? "rgba(57,255,20,0.9)" : "rgba(57,255,20,0.3)",
       lineWidth: i === 0 ? 2 : 1,
       lineStyle: 2,
+      axisLabelVisible: i === 0,
     });
   });
   asks.forEach(function (b, i) {
@@ -1290,18 +1291,17 @@ function bookWallLevels(book) {
     levels.push({
       id: "wall-ask-" + i,
       price: b.price,
-      title: i === 0 ? "Ask wall" : "Ask",
-      color: "#FF073A",
+      title: i === 0 ? "Ask wall" : "",
+      color: i === 0 ? "rgba(255,7,58,0.9)" : "rgba(255,7,58,0.3)",
       lineWidth: i === 0 ? 2 : 1,
       lineStyle: 2,
+      axisLabelVisible: i === 0,
     });
   });
   return levels;
 }
 
 
-
-/** Structural long + short level sets from swings/ATR (suggestion overlays, not signals). */
 function structureLongShortLevels(bars) {
   if (!bars || bars.length < 30) return [];
   const n = bars.length;
@@ -1334,26 +1334,29 @@ function structureLongShortLevels(bars) {
   levels.push({
     id: "ls-l-entry",
     price: lEntry,
-    title: "L entry",
-    color: "#39FF14",
-    lineWidth: 1,
+    title: "Long",
+    color: "rgba(57,255,20,0.7)",
+    lineWidth: 2,
     lineStyle: 2,
+    axisLabelVisible: true,
   });
   levels.push({
     id: "ls-l-stop",
     price: lStop,
-    title: "L stop",
-    color: "#FF073A",
+    title: "",
+    color: "rgba(255,7,58,0.35)",
     lineWidth: 1,
     lineStyle: 3,
+    axisLabelVisible: false,
   });
   levels.push({
     id: "ls-l-t1",
     price: price + lRisk * 1.5,
-    title: "L T1",
-    color: "#4ade80",
+    title: "",
+    color: "rgba(57,255,20,0.3)",
     lineWidth: 1,
     lineStyle: 3,
+    axisLabelVisible: false,
   });
   // Short structure
   const sEntry = Math.min(swingHigh, price + atr * 0.5);
@@ -1362,37 +1365,39 @@ function structureLongShortLevels(bars) {
   levels.push({
     id: "ls-s-entry",
     price: sEntry,
-    title: "S entry",
-    color: "#FF073A",
-    lineWidth: 1,
+    title: "Short",
+    color: "rgba(255,7,58,0.7)",
+    lineWidth: 2,
     lineStyle: 2,
+    axisLabelVisible: true,
   });
   levels.push({
     id: "ls-s-stop",
     price: sStop,
-    title: "S stop",
-    color: "#39FF14",
+    title: "",
+    color: "rgba(57,255,20,0.35)",
     lineWidth: 1,
     lineStyle: 3,
+    axisLabelVisible: false,
   });
   levels.push({
     id: "ls-s-t1",
     price: price - sRisk * 1.5,
-    title: "S T1",
-    color: "#f87171",
+    title: "",
+    color: "rgba(255,7,58,0.3)",
     lineWidth: 1,
     lineStyle: 3,
+    axisLabelVisible: false,
   });
   return levels;
 }
 
 
 
-/** High-volume price nodes from recent candles (liquidity proxy from your OHLCV). */
+/** High-volume nodes — max 3 labeled peaks, rest silent. */
 function volumeLiquidityLevels(bars) {
   if (!bars || bars.length < 20) return [];
   const slice = bars.slice(-80);
-  // Bucket by rough price step from ATR-ish range
   let lo = slice[0].low;
   let hi = slice[0].high;
   for (let i = 1; i < slice.length; i++) {
@@ -1400,7 +1405,7 @@ function volumeLiquidityLevels(bars) {
     if (slice[i].high > hi) hi = slice[i].high;
   }
   const range = hi - lo || 1;
-  const buckets = 24;
+  const buckets = 20;
   const step = range / buckets;
   const vol = new Array(buckets).fill(0);
   const mid = new Array(buckets).fill(0);
@@ -1416,23 +1421,34 @@ function volumeLiquidityLevels(bars) {
   let maxV = 0;
   for (let i = 0; i < buckets; i++) if (vol[i] > maxV) maxV = vol[i];
   if (!(maxV > 0)) return [];
-  const levels = [];
+  const ranked = [];
   for (let i = 0; i < buckets; i++) {
     const strength = vol[i] / maxV;
-    if (strength < 0.55) continue; // only stronger nodes
-    levels.push({
-      id: "liq-vol-" + i,
-      price: mid[i],
-      title: strength >= 0.85 ? "HVN" : "Vol",
-      color: strength >= 0.85 ? "rgba(34,211,238,0.95)" : "rgba(34,211,238,0.45)",
-      lineWidth: strength >= 0.85 ? 2 : 1,
-      lineStyle: 2,
-    });
+    if (strength < 0.65) continue;
+    ranked.push({ i: i, strength: strength, price: mid[i] });
   }
-  return levels.slice(0, 8);
+  ranked.sort(function (a, b) {
+    return b.strength - a.strength;
+  });
+  const levels = [];
+  ranked.slice(0, 3).forEach(function (r, n) {
+    levels.push({
+      id: "liq-vol-" + r.i,
+      price: r.price,
+      title: n === 0 ? "HVN" : "",
+      color:
+        n === 0
+          ? "rgba(56, 189, 248, 0.85)"
+          : "rgba(56, 189, 248, 0.35)",
+      lineWidth: n === 0 ? 2 : 1,
+      lineStyle: 2,
+      axisLabelVisible: n === 0,
+    });
+  });
+  return levels;
 }
 
-/** Deeper book liquidity (more levels than walls), size-weighted. */
+/** Deeper book — silent lines; only strongest labeled. */
 function bookLiquidityLevels(book) {
   if (!book || !book.bids || !book.asks) return [];
   const levels = [];
@@ -1441,13 +1457,13 @@ function bookLiquidityLevels(book) {
     .sort(function (a, b) {
       return b.size - a.size;
     })
-    .slice(0, 6);
+    .slice(0, 4);
   const asks = book.asks
     .slice()
     .sort(function (a, b) {
       return b.size - a.size;
     })
-    .slice(0, 6);
+    .slice(0, 4);
   let maxS = 0.0001;
   bids.forEach(function (b) {
     if (b.size > maxS) maxS = b.size;
@@ -1461,10 +1477,11 @@ function bookLiquidityLevels(book) {
     levels.push({
       id: "liq-bid-" + i,
       price: b.price,
-      title: w > 0.7 ? "Bid liq" : "",
-      color: "rgba(57,255,20," + (0.25 + w * 0.6).toFixed(2) + ")",
-      lineWidth: w > 0.7 ? 2 : 1,
-      lineStyle: 2,
+      title: i === 0 && w > 0.75 ? "Bid liq" : "",
+      color: "rgba(57,255,20," + (0.2 + w * 0.45).toFixed(2) + ")",
+      lineWidth: i === 0 ? 2 : 1,
+      lineStyle: 3,
+      axisLabelVisible: i === 0 && w > 0.75,
     });
   });
   asks.forEach(function (b, i) {
@@ -1473,10 +1490,11 @@ function bookLiquidityLevels(book) {
     levels.push({
       id: "liq-ask-" + i,
       price: b.price,
-      title: w > 0.7 ? "Ask liq" : "",
-      color: "rgba(255,7,58," + (0.25 + w * 0.6).toFixed(2) + ")",
-      lineWidth: w > 0.7 ? 2 : 1,
-      lineStyle: 2,
+      title: i === 0 && w > 0.75 ? "Ask liq" : "",
+      color: "rgba(255,7,58," + (0.2 + w * 0.45).toFixed(2) + ")",
+      lineWidth: i === 0 ? 2 : 1,
+      lineStyle: 3,
+      axisLabelVisible: i === 0 && w > 0.75,
     });
   });
   return levels;
@@ -2312,25 +2330,28 @@ export default function App() {
           id: "pdh",
           price: pd.high,
           title: "PDH",
-          color: "#f472b6",
+          color: "rgba(244,114,182,0.85)",
           lineWidth: 1,
           lineStyle: 2,
+          axisLabelVisible: true,
         });
         levels.push({
           id: "pdl",
           price: pd.low,
           title: "PDL",
-          color: "#38bdf8",
+          color: "rgba(56,189,248,0.85)",
           lineWidth: 1,
           lineStyle: 2,
+          axisLabelVisible: true,
         });
         levels.push({
           id: "pdc",
           price: pd.close,
-          title: "PDC",
-          color: "#94a3b8",
+          title: "",
+          color: "rgba(148,163,184,0.35)",
           lineWidth: 1,
           lineStyle: 3,
+          axisLabelVisible: false,
         });
       }
     }
@@ -2341,9 +2362,10 @@ export default function App() {
           id: "live",
           price: last.close,
           title: "Live",
-          color: "#e2e8f0",
+          color: "rgba(226,232,240,0.75)",
           lineWidth: 1,
           lineStyle: 0,
+          axisLabelVisible: true,
         });
       }
     }
@@ -2383,20 +2405,22 @@ export default function App() {
         levels.push({
           id: "setup-t1",
           price: spotSetup.t1,
-          title: "T1",
-          color: "#39FF14",
+          title: "",
+          color: "rgba(57,255,20,0.4)",
           lineWidth: 1,
           lineStyle: 2,
+          axisLabelVisible: false,
         });
       }
       if (Number.isFinite(spotSetup.t2)) {
         levels.push({
           id: "setup-t2",
           price: spotSetup.t2,
-          title: "T2",
-          color: "#39FF14",
+          title: "",
+          color: "rgba(57,255,20,0.25)",
           lineWidth: 1,
           lineStyle: 3,
+          axisLabelVisible: false,
         });
       }
     }

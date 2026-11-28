@@ -1300,6 +1300,93 @@ function bookWallLevels(book) {
 }
 
 
+
+/** Structural long + short level sets from swings/ATR (suggestion overlays, not signals). */
+function structureLongShortLevels(bars) {
+  if (!bars || bars.length < 30) return [];
+  const n = bars.length;
+  const last = bars[n - 1];
+  const price = last.close;
+  let atrSum = 0;
+  const atrN = Math.min(14, n - 1);
+  for (let i = n - atrN; i < n; i++) {
+    const prev = bars[i - 1];
+    const tr = Math.max(
+      bars[i].high - bars[i].low,
+      Math.abs(bars[i].high - prev.close),
+      Math.abs(bars[i].low - prev.close)
+    );
+    atrSum += tr;
+  }
+  const atr = atrSum / atrN || price * 0.01;
+  const win = bars.slice(-20);
+  let swingHigh = win[0].high;
+  let swingLow = win[0].low;
+  for (let i = 1; i < win.length; i++) {
+    if (win[i].high > swingHigh) swingHigh = win[i].high;
+    if (win[i].low < swingLow) swingLow = win[i].low;
+  }
+  const levels = [];
+  // Long structure
+  const lEntry = Math.max(swingLow, price - atr * 0.5);
+  const lStop = swingLow - atr * 0.35;
+  const lRisk = Math.max(price * 0.001, price - lStop);
+  levels.push({
+    id: "ls-l-entry",
+    price: lEntry,
+    title: "L entry",
+    color: "#39FF14",
+    lineWidth: 1,
+    lineStyle: 2,
+  });
+  levels.push({
+    id: "ls-l-stop",
+    price: lStop,
+    title: "L stop",
+    color: "#FF073A",
+    lineWidth: 1,
+    lineStyle: 3,
+  });
+  levels.push({
+    id: "ls-l-t1",
+    price: price + lRisk * 1.5,
+    title: "L T1",
+    color: "#4ade80",
+    lineWidth: 1,
+    lineStyle: 3,
+  });
+  // Short structure
+  const sEntry = Math.min(swingHigh, price + atr * 0.5);
+  const sStop = swingHigh + atr * 0.35;
+  const sRisk = Math.max(price * 0.001, sStop - price);
+  levels.push({
+    id: "ls-s-entry",
+    price: sEntry,
+    title: "S entry",
+    color: "#FF073A",
+    lineWidth: 1,
+    lineStyle: 2,
+  });
+  levels.push({
+    id: "ls-s-stop",
+    price: sStop,
+    title: "S stop",
+    color: "#39FF14",
+    lineWidth: 1,
+    lineStyle: 3,
+  });
+  levels.push({
+    id: "ls-s-t1",
+    price: price - sRisk * 1.5,
+    title: "S T1",
+    color: "#f87171",
+    lineWidth: 1,
+    lineStyle: 3,
+  });
+  return levels;
+}
+
+
 export default function App() {
 
   const initial = useMemo(() => readParams(), []);
@@ -1324,6 +1411,11 @@ export default function App() {
   const [showWatch, setShowWatch] = useState(false);
   const [showLiq, setShowLiq] = useState(false);
   const [showBookWalls, setShowBookWalls] = useState(false);
+  const [showOverlayBox, setShowOverlayBox] = useState(false);
+  const [showPriorDay, setShowPriorDay] = useState(true);
+  const [showLiveLine, setShowLiveLine] = useState(true);
+  const [showSetupLevels, setShowSetupLevels] = useState(true);
+  const [showLongShort, setShowLongShort] = useState(false);
   const [book, setBook] = useState(null);
   const [bookStatus, setBookStatus] = useState("");
   const [showVsBtc, setShowVsBtc] = useState(false);
@@ -2116,45 +2208,49 @@ export default function App() {
 
   const chartOverlays = useMemo(() => {
     const levels = [];
-    const pd = priorDayLevels(bars);
-    if (pd) {
-      levels.push({
-        id: "pdh",
-        price: pd.high,
-        title: "PDH",
-        color: "#f472b6",
-        lineWidth: 1,
-        lineStyle: 2,
-      });
-      levels.push({
-        id: "pdl",
-        price: pd.low,
-        title: "PDL",
-        color: "#38bdf8",
-        lineWidth: 1,
-        lineStyle: 2,
-      });
-      levels.push({
-        id: "pdc",
-        price: pd.close,
-        title: "PDC",
-        color: "#94a3b8",
-        lineWidth: 1,
-        lineStyle: 3,
-      });
+    if (showPriorDay) {
+      const pd = priorDayLevels(bars);
+      if (pd) {
+        levels.push({
+          id: "pdh",
+          price: pd.high,
+          title: "PDH",
+          color: "#f472b6",
+          lineWidth: 1,
+          lineStyle: 2,
+        });
+        levels.push({
+          id: "pdl",
+          price: pd.low,
+          title: "PDL",
+          color: "#38bdf8",
+          lineWidth: 1,
+          lineStyle: 2,
+        });
+        levels.push({
+          id: "pdc",
+          price: pd.close,
+          title: "PDC",
+          color: "#94a3b8",
+          lineWidth: 1,
+          lineStyle: 3,
+        });
+      }
     }
-    const last = bars && bars.length ? bars[bars.length - 1] : null;
-    if (last && Number.isFinite(last.close)) {
-      levels.push({
-        id: "live",
-        price: last.close,
-        title: "Live",
-        color: "#e2e8f0",
-        lineWidth: 1,
-        lineStyle: 0,
-      });
+    if (showLiveLine) {
+      const last = bars && bars.length ? bars[bars.length - 1] : null;
+      if (last && Number.isFinite(last.close)) {
+        levels.push({
+          id: "live",
+          price: last.close,
+          title: "Live",
+          color: "#e2e8f0",
+          lineWidth: 1,
+          lineStyle: 0,
+        });
+      }
     }
-    if (showSetup && spotSetup && spotSetup.side) {
+    if (showSetupLevels && showSetup && spotSetup && spotSetup.side) {
       const isLong = spotSetup.side === "long";
       if (Number.isFinite(spotSetup.entryLow) && Number.isFinite(spotSetup.entryHigh)) {
         levels.push({
@@ -2207,7 +2303,12 @@ export default function App() {
         });
       }
     }
-    // Order-book walls only when toggle is on
+    if (showLongShort) {
+      try {
+        const ls = structureLongShortLevels(bars);
+        for (let i = 0; i < ls.length; i++) levels.push(ls[i]);
+      } catch (_) {}
+    }
     if (showBookWalls) {
       try {
         const walls = bookWallLevels(book);
@@ -2215,7 +2316,18 @@ export default function App() {
       } catch (_) {}
     }
     return levels;
-  }, [bars, showSetup, spotSetup, book, showBookWalls]);
+  }, [
+    bars,
+    showSetup,
+    spotSetup,
+    book,
+    showBookWalls,
+    showPriorDay,
+    showLiveLine,
+    showSetupLevels,
+    showLongShort,
+  ]);
+
 
 
 
@@ -2511,7 +2623,109 @@ export default function App() {
         </div>
 
 
-        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <button
+            type="button"
+            className={"interval-btn" + (showOverlayBox ? " active" : "")}
+            title="Chart overlays"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={() => {
+              setShowOverlayBox((v) => !v);
+              if (!showOverlayBox) {
+                setShowIndBox(false);
+                setShowWatch(false);
+                setShowLiq(false);
+                setShowAnalysis(false);
+                setShowSetup(false);
+              }
+            }}
+          >
+            Overlays
+          </button>
+          {showOverlayBox ? (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 6px)",
+                left: 0,
+                zIndex: 130,
+                width: 200,
+                padding: "8px",
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.22)",
+                background: "#0f141c",
+                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                fontSize: "0.72rem",
+                color: "#c5d0e0",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#6b7c93",
+                  padding: "2px 4px 8px",
+                }}
+              >
+                Overlays
+              </div>
+              {[
+                ["Prior day (PDH/PDL/PDC)", showPriorDay, setShowPriorDay],
+                ["Live price line", showLiveLine, setShowLiveLine],
+                ["Setup levels", showSetupLevels, setShowSetupLevels],
+                ["Long + short structure", showLongShort, setShowLongShort],
+                ["Book walls", showBookWalls, setShowBookWalls],
+              ].map(function (row) {
+                const label = row[0];
+                const val = row[1];
+                const set = row[2];
+                return (
+                  <label
+                    key={label}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 6px",
+                      marginBottom: 2,
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      background: val ? "rgba(34, 211, 238, 0.1)" : "transparent",
+                      color: val ? "#22d3ee" : "#c5d0e0",
+                      fontWeight: val ? 600 : 500,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={val}
+                      onChange={function (e) {
+                        set(e.target.checked);
+                      }}
+                      style={{ accentColor: "#22d3ee", margin: 0 }}
+                    />
+                    {label}
+                  </label>
+                );
+              })}
+              <div
+                style={{
+                  marginTop: 8,
+                  paddingTop: 8,
+                  borderTop: "1px solid rgba(148,163,184,0.12)",
+                  fontSize: "0.62rem",
+                  color: "#6b7c93",
+                  lineHeight: 1.35,
+                }}
+              >
+                Setup levels need the Setup panel bias. Sessions stay on the Sessions
+                button. Walls use the live order book.
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (showSetup ? " active" : "")}
@@ -3069,16 +3283,7 @@ export default function App() {
           ) : null}
         </div>
 
-        <button
-          type="button"
-          className={"interval-btn" + (showBookWalls ? " active" : "")}
-          title="Order book wall overlays"
-          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-          onClick={() => setShowBookWalls((v) => !v)}
-        >
-          Walls
-        </button>
-
+        
 <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"

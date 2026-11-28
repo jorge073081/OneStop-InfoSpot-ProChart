@@ -35,11 +35,11 @@ export default function MiniChart({ bars, label }) {
     });
 
     const series = chart.addCandlestickSeries({
-      upColor: "#22c55e",
-      downColor: "#ef4444",
+      upColor: "#39FF14",
+      downColor: "#FF073A",
       borderVisible: false,
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
+      wickUpColor: "#39FF14",
+      wickDownColor: "#FF073A",
     });
 
     chartRef.current = { chart, series };

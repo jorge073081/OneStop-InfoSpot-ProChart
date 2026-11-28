@@ -1323,6 +1323,7 @@ export default function App() {
   });
   const [showWatch, setShowWatch] = useState(false);
   const [showLiq, setShowLiq] = useState(false);
+  const [showBookWalls, setShowBookWalls] = useState(false);
   const [book, setBook] = useState(null);
   const [bookStatus, setBookStatus] = useState("");
   const [showVsBtc, setShowVsBtc] = useState(false);
@@ -1436,6 +1437,7 @@ export default function App() {
 
   // Order book liquidity panel — only while open; never touches chart bars
   useEffect(() => {
+    if (!showLiq && !showBookWalls) return undefined;
     let cancelled = false;
     let timer = null;
 
@@ -1462,7 +1464,7 @@ export default function App() {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [symbol]);
+  }, [symbol, showLiq, showBookWalls]);
 
 
   // Price alerts on horizontal drawings — uses live last price; never mutates bars
@@ -2205,13 +2207,15 @@ export default function App() {
         });
       }
     }
-    // Order-book walls (largest bid/ask sizes) — real depth, not liquidations
-    try {
-      const walls = bookWallLevels(book);
-      for (let i = 0; i < walls.length; i++) levels.push(walls[i]);
-    } catch (_) {}
+    // Order-book walls only when toggle is on
+    if (showBookWalls) {
+      try {
+        const walls = bookWallLevels(book);
+        for (let i = 0; i < walls.length; i++) levels.push(walls[i]);
+      } catch (_) {}
+    }
     return levels;
-  }, [bars, showSetup, spotSetup, book]);
+  }, [bars, showSetup, spotSetup, book, showBookWalls]);
 
 
 
@@ -3064,6 +3068,16 @@ export default function App() {
             </div>
           ) : null}
         </div>
+
+        <button
+          type="button"
+          className={"interval-btn" + (showBookWalls ? " active" : "")}
+          title="Order book wall overlays"
+          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+          onClick={() => setShowBookWalls((v) => !v)}
+        >
+          Walls
+        </button>
 
 <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button

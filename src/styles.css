@@ -210,6 +210,7 @@ select {
 .multi-main {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -217,7 +218,8 @@ select {
 
 .chart-panel {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 280px;
+  height: 100%;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;

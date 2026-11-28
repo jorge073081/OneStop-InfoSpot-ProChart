@@ -3406,10 +3406,10 @@ export default function App() {
                 setShowFunding(false);
               }
             }}
-            title="Order book liquidity heatmap"
+            title="Order book depth panel"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}
           >
-            Liquidity
+            Book
           </button>
           {showLiq ? (
             <div
@@ -3439,7 +3439,7 @@ export default function App() {
                   justifyContent: "space-between",
                 }}
               >
-                <span>Liquidity</span>
+                <span>Book depth</span>
                 <span style={{ textTransform: "none", letterSpacing: 0 }}>{bookStatus}</span>
               </div>
               {!book ? (

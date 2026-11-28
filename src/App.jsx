@@ -1663,84 +1663,155 @@ export default function App() {
   }, [symbol]);
 
 
+  // Real-time WebSocket updates (Coinbase ticker primary, Binance.US kline fallback)
   useEffect(() => {
-    if (!bars.length) return;
+    if (!bars.length) return undefined;
 
-    let ws;
-    let reconnectTimer;
+    let ws = null;
+    let reconnectTimer = null;
+    let heartbeatTimer = null;
     let isCancelled = false;
+    let attempt = 0;
+
+    const clearTimers = () => {
+      if (reconnectTimer != null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (heartbeatTimer != null) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+    };
+
+    const closeWs = () => {
+      if (!ws) return;
+      try {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (
+          ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING
+        ) {
+          ws.close();
+        }
+      } catch (_) {}
+      ws = null;
+    };
+
+    const scheduleReconnect = (connectFn) => {
+      if (isCancelled) return;
+      clearTimers();
+      const delay = Math.min(10000, 1000 * Math.pow(1.6, attempt));
+      attempt += 1;
+      setLiveState("Reconnecting…");
+      reconnectTimer = window.setTimeout(function () {
+        connectFn();
+      }, delay);
+    };
+
+    const applyCoinbaseTrade = (price, tradeSize, tradeTime) => {
+      const bucketSec = INTERVAL_SECONDS[interval] || 86400;
+      const candleStart = Math.floor(tradeTime / bucketSec) * bucketSec;
+
+      setBars((prevBars) => {
+        if (!prevBars.length) return prevBars;
+        const lastBar = prevBars[prevBars.length - 1];
+        if (candleStart === lastBar.time) {
+          const updated = prevBars.slice();
+          updated[updated.length - 1] = {
+            time: lastBar.time,
+            open: lastBar.open,
+            high: Math.max(lastBar.high, price),
+            low: Math.min(lastBar.low, price),
+            close: price,
+            volume: (lastBar.volume || 0) + (tradeSize || 0),
+          };
+          return updated;
+        }
+        if (candleStart > lastBar.time) {
+          return prevBars.slice(1).concat([
+            {
+              time: candleStart,
+              open: price,
+              high: price,
+              low: price,
+              close: price,
+              volume: tradeSize || 0,
+            },
+          ]);
+        }
+        return prevBars;
+      });
+
+      if (showMultiTfRef.current) {
+        const pair = multiPairRef.current || [];
+        const secA = INTERVAL_SECONDS[pair[0]] || 3600;
+        const secB = INTERVAL_SECONDS[pair[1]] || 14400;
+        setMultiBarsA((prev) =>
+          applyLiveTrade(prev, price, tradeSize, tradeTime, secA)
+        );
+        setMultiBarsB((prev) =>
+          applyLiveTrade(prev, price, tradeSize, tradeTime, secB)
+        );
+      }
+    };
 
     const connectCoinbase = () => {
       if (isCancelled) return;
+      closeWs();
       setLiveState("Connecting…");
       const product = toCoinbaseProduct(symbol);
-      const bucketSec = INTERVAL_SECONDS[interval] || 86400;
 
-      ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
+      try {
+        ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
+      } catch (_) {
+        scheduleReconnect(connectCoinbase);
+        return;
+      }
 
       ws.onopen = () => {
         if (isCancelled) return;
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            product_ids: [product],
-            channels: ["ticker"],
-          })
-        );
+        attempt = 0;
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              product_ids: [product],
+              channels: ["ticker"],
+            })
+          );
+        } catch (_) {}
         setLiveState("● LIVE (Coinbase)");
+        // Coinbase may drop idle sockets; lightweight heartbeat subscribe refresh
+        heartbeatTimer = window.setInterval(function () {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          try {
+            ws.send(
+              JSON.stringify({
+                type: "subscribe",
+                product_ids: [product],
+                channels: ["ticker"],
+              })
+            );
+          } catch (_) {}
+        }, 25000);
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type !== "ticker" || !msg.price) return;
-
           const price = parseFloat(msg.price);
-          const tradeSize = parseFloat(msg.last_size || 0);
-          const tradeTime = msg.time ? Math.floor(new Date(msg.time).getTime() / 1000) : Math.floor(Date.now() / 1000);
-          const candleStart = Math.floor(tradeTime / bucketSec) * bucketSec;
-
-          setBars((prevBars) => {
-            if (!prevBars.length) return prevBars;
-            const lastBar = prevBars[prevBars.length - 1];
-
-            if (candleStart === lastBar.time) {
-              const updatedBar = {
-                ...lastBar,
-                high: Math.max(lastBar.high, price),
-                low: Math.min(lastBar.low, price),
-                close: price,
-                volume: lastBar.volume + tradeSize,
-              };
-              const updated = [...prevBars];
-              updated[updated.length - 1] = updatedBar;
-              return updated;
-            } else if (candleStart > lastBar.time) {
-              const newBar = {
-                time: candleStart,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: tradeSize,
-              };
-              return [...prevBars.slice(1), newBar];
-            }
-            return prevBars;
-          });
-          // Live multi-TF side panes from same tape
-          if (showMultiTfRef.current) {
-            const pair = multiPairRef.current || [];
-            const secA = INTERVAL_SECONDS[pair[0]] || 3600;
-            const secB = INTERVAL_SECONDS[pair[1]] || 14400;
-            setMultiBarsA((prev) =>
-              applyLiveTrade(prev, price, tradeSize, tradeTime, secA)
-            );
-            setMultiBarsB((prev) =>
-              applyLiveTrade(prev, price, tradeSize, tradeTime, secB)
-            );
-          }
-        } catch {}
+          if (!Number.isFinite(price)) return;
+          const tradeSize = parseFloat(msg.last_size || 0) || 0;
+          const tradeTime = msg.time
+            ? Math.floor(new Date(msg.time).getTime() / 1000)
+            : Math.floor(Date.now() / 1000);
+          applyCoinbaseTrade(price, tradeSize, tradeTime);
+        } catch (_) {}
       };
 
       ws.onerror = () => {
@@ -1748,22 +1819,37 @@ export default function App() {
       };
 
       ws.onclose = () => {
-        if (!isCancelled) {
-          setLiveState("Reconnecting…");
-          reconnectTimer = setTimeout(connectCoinbase, 3000);
-        }
+        clearTimers();
+        if (!isCancelled) scheduleReconnect(connectCoinbase);
       };
     };
 
     const connectBinance = () => {
       if (isCancelled) return;
+      closeWs();
       setLiveState("Connecting…");
-      const binanceInterval = INTERVALS.find((i) => i.id === interval)?.binance || "1d";
-      const streamName = `${symbol.toLowerCase()}@kline_${binanceInterval}`;
-      ws = new WebSocket(`wss://stream.binance.us:9443/ws/${streamName}`);
+      const binanceInterval =
+        (INTERVALS.find((i) => i.id === interval) || {}).binance || "1d";
+      const streamSym = String(symbol || "BTCUSDT")
+        .toUpperCase()
+        .replace("-USD", "USDT")
+        .replace("-USDT", "USDT")
+        .toLowerCase();
+      const streamName = streamSym + "@kline_" + binanceInterval;
+
+      try {
+        ws = new WebSocket(
+          "wss://stream.binance.us:9443/ws/" + streamName
+        );
+      } catch (_) {
+        scheduleReconnect(connectBinance);
+        return;
+      }
 
       ws.onopen = () => {
-        if (!isCancelled) setLiveState("● LIVE (Binance.US)");
+        if (isCancelled) return;
+        attempt = 0;
+        setLiveState("● LIVE (Binance.US)");
       };
 
       ws.onmessage = (event) => {
@@ -1779,33 +1865,34 @@ export default function App() {
             close: parseFloat(k.c),
             volume: parseFloat(k.v),
           };
+          if (!Number.isFinite(liveBar.close)) return;
 
           setBars((prevBars) => {
             if (!prevBars.length) return prevBars;
             const lastBar = prevBars[prevBars.length - 1];
             if (lastBar.time === liveBar.time) {
-              const updated = [...prevBars];
+              const updated = prevBars.slice();
               updated[updated.length - 1] = liveBar;
               return updated;
-            } else if (liveBar.time > lastBar.time) {
-              return [...prevBars.slice(1), liveBar];
+            }
+            if (liveBar.time > lastBar.time) {
+              return prevBars.slice(1).concat([liveBar]);
             }
             return prevBars;
           });
+
           if (showMultiTfRef.current) {
             const pair = multiPairRef.current || [];
-            const tradeTime = liveBar.time;
-            const price = liveBar.close;
             const secA = INTERVAL_SECONDS[pair[0]] || 3600;
             const secB = INTERVAL_SECONDS[pair[1]] || 14400;
             setMultiBarsA((prev) =>
-              applyLiveTrade(prev, price, 0, tradeTime, secA)
+              applyLiveTrade(prev, liveBar.close, 0, liveBar.time, secA)
             );
             setMultiBarsB((prev) =>
-              applyLiveTrade(prev, price, 0, tradeTime, secB)
+              applyLiveTrade(prev, liveBar.close, 0, liveBar.time, secB)
             );
           }
-        } catch {}
+        } catch (_) {}
       };
 
       ws.onerror = () => {
@@ -1813,10 +1900,7 @@ export default function App() {
       };
 
       ws.onclose = () => {
-        if (!isCancelled) {
-          setLiveState("Reconnecting…");
-          reconnectTimer = setTimeout(connectBinance, 3000);
-        }
+        if (!isCancelled) scheduleReconnect(connectBinance);
       };
     };
 
@@ -1828,12 +1912,12 @@ export default function App() {
 
     return () => {
       isCancelled = true;
-      clearTimeout(reconnectTimer);
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        ws.close();
-      }
+      clearTimers();
+      closeWs();
     };
   }, [symbol, interval, dataSource, bars.length > 0]);
+
+
 
   const onSubmit = (e) => {
     e.preventDefault();

@@ -1898,50 +1898,64 @@ export default function App() {
             onChange={(e) => setSymbolInput(e.target.value)}
             placeholder="BTC-USD or BTCUSDT"
             aria-label="Symbol"
+            title="Press Enter to load"
           />
-          <button type="submit">Load</button>
+          <span className="meta symbol-ticker" title="Last price">
+            {last ? (
+              <>
+                <strong>{last.close}</strong>{" "}
+                {chgPct != null && (
+                  <span className={chgPct >= 0 ? "up" : "down"}>
+                    {chgSign}
+                    {chgText}%
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
+          </span>
         </form>
 
-        <div className="intervals">
-          {INTERVALS.map((i) => (
-            <button
-              key={i.id}
-              type="button"
-              className={`interval-btn${interval === i.id ? " active" : ""}`}
-              onClick={() => setInterval(i.id)}
-            >
-              {i.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}>
           <button
             type="button"
-            className={"interval-btn" + (showIndBox ? " active" : "")}
+            className={"interval-btn" + (showWatch ? " active" : "")}
             onClick={() => {
-              setShowIndBox((v) => !v);
-              if (!showIndBox) {
-                setShowWatch(false);
+              setShowWatch((v) => !v);
+              if (!showWatch) {
+                setShowIndBox(false);
                 setShowLiq(false);
                 setShowVsBtc(false);
                 setShowFunding(false);
+                setShowAnalysis(false);
+                setShowSetup(false);
               }
             }}
-            title="Indicators"
+            title="Watchlist"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}
           >
-            Indicators
+            ★ {watchlist.length || ""}
           </button>
-          {showIndBox ? (
+          <button
+            type="button"
+            className="interval-btn"
+            onClick={addToWatchlist}
+            title={"Add " + displaySymbol(symbol)}
+            style={{ fontSize: "0.72rem", padding: "4px 8px", minWidth: 28 }}
+          >
+            +
+          </button>
+          {showWatch ? (
             <div
+              role="listbox"
               style={{
                 position: "absolute",
                 top: "calc(100% + 6px)",
                 left: 0,
                 zIndex: 80,
                 width: 168,
-                maxHeight: 280,
+                maxHeight: 220,
                 overflowY: "auto",
                 padding: "6px",
                 borderRadius: 10,
@@ -1959,77 +1973,80 @@ export default function App() {
                   padding: "2px 6px 6px",
                 }}
               >
-                Indicators
+                Watchlist
               </div>
-              {[
-                ["SMA 50", showSma50, setShowSma50],
-                ["SMA 200", showSma200, setShowSma200],
-                ["EMA 9", showEma9, setShowEma9],
-                ["EMA 21", showEma21, setShowEma21],
-                ["EMA 50", showEma50, setShowEma50],
-                ["BB", showBb, setShowBb],
-                ["VWAP", showVwap, setShowVwap],
-                ["RSI", showRsi, setShowRsi],
-                ["MACD", showMacd, setShowMacd],
-                ["Stoch", showStoch, setShowStoch],
-                ["ATR", showAtr, setShowAtr],
-              ].map(([label, val, set]) => (
-                <label
-                  key={label}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "5px 8px",
-                    marginBottom: 2,
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: "0.72rem",
-                    color: val ? "#22d3ee" : "#c5d0e0",
-                    fontWeight: val ? 600 : 500,
-                    background: val ? "rgba(34, 211, 238, 0.12)" : "transparent",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={val}
-                    onChange={(e) => set(e.target.checked)}
-                    style={{ accentColor: "#22d3ee", margin: 0 }}
-                  />
-                  {label}
-                </label>
-              ))}
+              {watchlist.length === 0 ? (
+                <div style={{ fontSize: "0.72rem", color: "#8b9bb4", padding: "6px" }}>
+                  No tickers yet
+                </div>
+              ) : (
+                watchlist.map((sym) => (
+                  <div
+                    key={sym}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2,
+                      marginBottom: 2,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openWatchSymbol(sym)}
+                      style={{
+                        flex: 1,
+                        textAlign: "left",
+                        fontSize: "0.72rem",
+                        padding: "5px 8px",
+                        borderRadius: 6,
+                        border: "none",
+                        cursor: "pointer",
+                        background: symbol === sym ? "rgba(34, 211, 238, 0.15)" : "transparent",
+                        color: symbol === sym ? "#22d3ee" : "#c5d0e0",
+                        fontWeight: symbol === sym ? 600 : 500,
+                      }}
+                    >
+                      {displaySymbol(sym)}
+                    </button>
+                    <button
+                      type="button"
+                      title="Remove"
+                      onClick={() => removeFromWatchlist(sym)}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#6b7c93",
+                        cursor: "pointer",
+                        fontSize: "0.8rem",
+                        padding: "2px 6px",
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           ) : null}
         </div>
 
-        
-                                <button
-          type="button"
-          className="interval-btn"
-          title="Copy shareable chart link"
-          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-          onClick={async () => {
-            const url = writeParams(symbol, interval, drawings);
-            try {
-              await navigator.clipboard.writeText(url);
-              setShareHint("Link copied");
-            } catch {
-              try {
-                window.prompt("Copy link:", url);
-                setShareHint("Copy the link");
-              } catch {
-                setShareHint("Share failed");
-              }
-            }
-            window.setTimeout(function () {
-              setShareHint("");
-            }, 2000);
-          }}
-        >
-          {shareHint || "Share"}
-        </button>
 
+
+        <div className="intervals">
+          {INTERVALS.map((i) => (
+            <button
+              key={i.id}
+              type="button"
+              className={`interval-btn${interval === i.id ? " active" : ""}`}
+              onClick={() => setInterval(i.id)}
+            >
+              {i.label}
+            </button>
+          ))}
+        </div>
+
+        
 <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
@@ -2866,141 +2883,32 @@ export default function App() {
           </span>
         </div>
 
-        <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <button
-            type="button"
-            className={"interval-btn" + (showWatch ? " active" : "")}
-            onClick={() => {
-              setShowWatch((v) => !v);
-              if (!showWatch) {
-                setShowIndBox(false);
-                setShowLiq(false);
-                setShowVsBtc(false);
-                setShowFunding(false);
-              }
-            }}
-            title="Watchlist"
-            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-          >
-            ★ {watchlist.length || ""}
-          </button>
+        <div className="meta" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
             className="interval-btn"
-            onClick={addToWatchlist}
-            title={"Add " + displaySymbol(symbol)}
-            style={{ fontSize: "0.72rem", padding: "4px 8px", minWidth: 28 }}
+            title="Copy shareable chart link"
+            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
+            onClick={async () => {
+              const url = writeParams(symbol, interval, drawings);
+              try {
+                await navigator.clipboard.writeText(url);
+                setShareHint("Link copied");
+              } catch {
+                try {
+                  window.prompt("Copy link:", url);
+                  setShareHint("Copy the link");
+                } catch {
+                  setShareHint("Share failed");
+                }
+              }
+              window.setTimeout(function () {
+                setShareHint("");
+              }, 2000);
+            }}
           >
-            +
+            {shareHint || "Share"}
           </button>
-          {showWatch ? (
-            <div
-              role="listbox"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                right: 0,
-                zIndex: 80,
-                width: 168,
-                maxHeight: 220,
-                overflowY: "auto",
-                padding: "6px",
-                borderRadius: 10,
-                border: "1px solid rgba(148,163,184,0.22)",
-                background: "#0f141c",
-                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "0.65rem",
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "#6b7c93",
-                  padding: "2px 6px 6px",
-                }}
-              >
-                Watchlist
-              </div>
-              {watchlist.length === 0 ? (
-                <div style={{ fontSize: "0.72rem", color: "#8b9bb4", padding: "6px" }}>
-                  No tickers yet
-                </div>
-              ) : (
-                watchlist.map((sym) => (
-                  <div
-                    key={sym}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 2,
-                      marginBottom: 2,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => openWatchSymbol(sym)}
-                      style={{
-                        flex: 1,
-                        textAlign: "left",
-                        fontSize: "0.72rem",
-                        padding: "5px 8px",
-                        borderRadius: 6,
-                        border: "none",
-                        cursor: "pointer",
-                        background: symbol === sym ? "rgba(34, 211, 238, 0.15)" : "transparent",
-                        color: symbol === sym ? "#22d3ee" : "#c5d0e0",
-                        fontWeight: symbol === sym ? 600 : 500,
-                      }}
-                      onMouseEnter={(e) => {
-                        if (symbol !== sym) e.currentTarget.style.background = "rgba(148,163,184,0.1)";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (symbol !== sym) e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      {displaySymbol(sym)}
-                    </button>
-                    <button
-                      type="button"
-                      title="Remove"
-                      onClick={() => removeFromWatchlist(sym)}
-                      style={{
-                        border: "none",
-                        background: "transparent",
-                        color: "#6b7c93",
-                        cursor: "pointer",
-                        fontSize: "0.8rem",
-                        padding: "2px 6px",
-                        lineHeight: 1,
-                        borderRadius: 4,
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          ) : null}
-        </div>
-
-
-
-        <div className="meta">
-          {last ? (
-            <>
-              <strong>{last.close}</strong>{" "}
-              {chgPct != null && (
-                <span className={chgPct >= 0 ? "up" : "down"}>
-                  {chgSign}
-                  {chgText}%
-                </span>
-              )}
-            </>
-          ) : (
-            "—"
-          )}
         </div>
       </header>
 
@@ -3027,7 +2935,103 @@ export default function App() {
             </div>
           ))}
 
+          
           <div className="draw-divider" />
+          <div style={{ position: "relative", width: "100%" }}>
+            <button
+              type="button"
+              title="Indicators"
+              aria-label="Indicators"
+              className={"tool-btn" + (showIndBox ? " active" : "")}
+              onClick={() => {
+                setShowIndBox((v) => !v);
+                if (!showIndBox) {
+                  setShowWatch(false);
+                  setShowLiq(false);
+                  setShowVsBtc(false);
+                  setShowFunding(false);
+                }
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 19V5" />
+                <path d="M4 19h16" />
+                <path d="M8 15v-3" />
+                <path d="M12 15V8" />
+                <path d="M16 15v-5" />
+              </svg>
+            </button>
+            {showIndBox ? (
+              <div
+                style={{
+                  position: "absolute",
+                  left: "calc(100% + 8px)",
+                  top: 0,
+                  zIndex: 100,
+                  width: 168,
+                  maxHeight: 320,
+                  overflowY: "auto",
+                  padding: "6px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(148,163,184,0.22)",
+                  background: "#0f141c",
+                  boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.65rem",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "#6b7c93",
+                    padding: "2px 6px 6px",
+                  }}
+                >
+                  Indicators
+                </div>
+                {[
+                  ["SMA 50", showSma50, setShowSma50],
+                  ["SMA 200", showSma200, setShowSma200],
+                  ["EMA 9", showEma9, setShowEma9],
+                  ["EMA 21", showEma21, setShowEma21],
+                  ["EMA 50", showEma50, setShowEma50],
+                  ["BB", showBb, setShowBb],
+                  ["VWAP", showVwap, setShowVwap],
+                  ["RSI", showRsi, setShowRsi],
+                  ["MACD", showMacd, setShowMacd],
+                  ["Stoch", showStoch, setShowStoch],
+                  ["ATR", showAtr, setShowAtr],
+                ].map(([label, val, set]) => (
+                  <label
+                    key={label}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "5px 8px",
+                      marginBottom: 2,
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      fontSize: "0.72rem",
+                      color: val ? "#22d3ee" : "#c5d0e0",
+                      fontWeight: val ? 600 : 500,
+                      background: val ? "rgba(34, 211, 238, 0.12)" : "transparent",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={val}
+                      onChange={(e) => set(e.target.checked)}
+                      style={{ accentColor: "#22d3ee", margin: 0 }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+<div className="draw-divider" />
 
           <button
             type="button"

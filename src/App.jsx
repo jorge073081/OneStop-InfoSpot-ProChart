@@ -2747,271 +2747,8 @@ export default function App() {
           ))}
         </div>
 
-        
-<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-          <button
-            type="button"
-            className={"interval-btn" + (alertsOn ? " active" : "")}
-            title="Alerts: drawings + PDH/PDL + Setup + walls"
-            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-            onClick={async () => {
-              if (!alertsOn) {
-                try {
-                  if (typeof Notification !== "undefined" && Notification.permission === "default") {
-                    await Notification.requestPermission();
-                  }
-                } catch (_) {}
-                firedRef.current = {};
-                lastPriceRef.current = bars.length ? bars[bars.length - 1].close : null;
-                setAlertsOn(true);
-              } else {
-                setAlertsOn(false);
-              }
-            }}
-          >
-            {alertsOn ? "Alerts on" : "Alerts"}
-          </button>
-          {alertsOn && alertLog.length ? (
-            <div
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                left: 0,
-                zIndex: 500,
-                width: 220,
-                maxHeight: 200,
-                overflowY: "auto",
-                padding: "8px",
-                borderRadius: 10,
-                border: "1px solid rgba(148,163,184,0.22)",
-                background: "#0f141c",
-                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
-                fontSize: "0.68rem",
-                color: "#c5d0e0",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "0.65rem",
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "#6b7c93",
-                  padding: "2px 4px 6px",
-                }}
-              >
-                Recent alerts
-              </div>
-              {alertLog.map((a) => (
-                <div key={a.id} style={{ padding: "4px 4px", borderBottom: "1px solid rgba(148,163,184,0.08)" }}>
-                  <div>{a.text}</div>
-                  <div style={{ color: "#6b7c93" }}>{a.at}</div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
 
-                                        <button
-          type="button"
-          className={"interval-btn" + (showMultiTf ? " active" : "")}
-          title="Multi-timeframe split view"
-          style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-          onClick={() =>
-            setShowMultiTf((v) => {
-              const next = !v;
-              if (next) setShowCompare(false);
-              return next;
-            })
-          }
-        >
-          Multi-TF
-        </button>
-        <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <button
-            type="button"
-            className={"interval-btn" + (showCompare ? " active" : "")}
-            title="Compare another asset"
-            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-            onClick={() => {
-              setShowCompare((v) => {
-                const next = !v;
-                if (next) setShowMultiTf(false);
-                return next;
-              });
-            }}
-          >
-            Compare
-          </button>
-          {showCompare ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const next = normalizeSymbol(compareInput);
-                setCompareSymbol(next);
-                setCompareInput(displaySymbol(next));
-              }}
-              style={{ display: "inline-flex", gap: 4, alignItems: "center" }}
-            >
-              <input
-                value={compareInput}
-                onChange={(e) => setCompareInput(e.target.value)}
-                placeholder="ETH-USD"
-                style={{
-                  width: 88,
-                  height: 26,
-                  fontSize: "0.68rem",
-                  padding: "2px 6px",
-                  borderRadius: 6,
-                  border: "1px solid #1e2630",
-                  background: "#0b0e11",
-                  color: "#e8eef7",
-                }}
-              />
-              <button type="submit" className="interval-btn" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>
-                Go
-              </button>
-            </form>
-          ) : null}
-        </div>
-
-
-                <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-          <button
-            type="button"
-            className={"interval-btn" + (showOverlayBox ? " active" : "")}
-            title="Chart overlays"
-            style={{ fontSize: "0.72rem", padding: "4px 10px" }}
-            onClick={() => {
-              setShowOverlayBox((v) => !v);
-              if (!showOverlayBox) {
-                setShowIndBox(false);
-                setShowWatch(false);
-                setShowLiq(false);
-                setShowAnalysis(false);
-                setShowSetup(false);
-              }
-            }}
-          >
-            Overlays
-          </button>
-          {showOverlayBox ? (
-            <div
-              style={{
-                position: "absolute",
-                top: "calc(100% + 6px)",
-                left: 0,
-                zIndex: 500,
-                width: 200,
-                padding: "8px",
-                borderRadius: 10,
-                border: "1px solid rgba(148,163,184,0.22)",
-                background: "#0f141c",
-                boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
-                fontSize: "0.72rem",
-                color: "#c5d0e0",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "0.65rem",
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "#6b7c93",
-                  padding: "2px 4px 8px",
-                }}
-              >
-                Overlays
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 4,
-                  marginBottom: 8,
-                }}
-              >
-                {[
-                  ["clean", "Clean"],
-                  ["intraday", "Intraday"],
-                  ["scalp", "Scalp"],
-                  ["structure", "Structure"],
-                ].map(function (p) {
-                  const id = p[0];
-                  const label = p[1];
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className={
-                        "interval-btn" + (overlayPreset === id ? " active" : "")
-                      }
-                      style={{ fontSize: "0.65rem", padding: "3px 7px" }}
-                      onClick={function () {
-                        applyOverlayPreset(id);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              {[
-                ["Prior day (PDH/PDL/PDC)", showPriorDay, setShowPriorDay],
-                ["Live price line", showLiveLine, setShowLiveLine],
-                ["Setup levels", showSetupLevels, setShowSetupLevels],
-                ["Long + short structure", showLongShort, setShowLongShort],
-                ["Book walls", showBookWalls, setShowBookWalls],
-                ["Liquidity overlay", showLiqOverlay, setShowLiqOverlay],
-              ].map(function (row) {
-                const label = row[0];
-                const val = row[1];
-                const set = row[2];
-                return (
-                  <label
-                    key={label}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "6px 6px",
-                      marginBottom: 2,
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      background: val ? "rgba(34, 211, 238, 0.1)" : "transparent",
-                      color: val ? "#22d3ee" : "#c5d0e0",
-                      fontWeight: val ? 600 : 500,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={val}
-                      onChange={function (e) {
-                        set(e.target.checked);
-                      }}
-                      style={{ accentColor: "#22d3ee", margin: 0 }}
-                    />
-                    {label}
-                  </label>
-                );
-              })}
-              <div
-                style={{
-                  marginTop: 8,
-                  paddingTop: 8,
-                  borderTop: "1px solid rgba(148,163,184,0.12)",
-                  fontSize: "0.62rem",
-                  color: "#6b7c93",
-                  lineHeight: 1.35,
-                }}
-              >
-                Liquidity = high-volume nodes from candles + deeper book levels.
-                Not liquidation data. Sessions stay on the Sessions button.
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-<div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <button
             type="button"
             className={"interval-btn" + (showSetup ? " active" : "")}
@@ -3751,7 +3488,249 @@ export default function App() {
       </header>
 
       <div className="workspace">
-        <aside className="draw-sidebar" aria-label="Drawing Tools">
+        <aside className="draw-sidebar" aria-label="Chart tools">
+          {/* —— Analysis tools (top) —— */}
+          <div className="side-group" title="Analysis">
+            <div style={{ position: "relative", width: "100%" }}>
+              <button
+                type="button"
+                title="Indicators"
+                aria-label="Indicators"
+                className={"tool-btn" + (showIndBox ? " active" : "")}
+                onClick={() => {
+                  setShowIndBox((v) => !v);
+                  if (!showIndBox) {
+                    setShowOverlayBox(false);
+                    setShowWatch(false);
+                    setShowLiq(false);
+                  }
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M4 19V5" />
+                  <path d="M4 19h16" />
+                  <path d="M8 15v-3" />
+                  <path d="M12 15V8" />
+                  <path d="M16 15v-5" />
+                </svg>
+              </button>
+              {showIndBox ? (
+                <div className="side-flyout">
+                  <div className="side-flyout-title">Indicators</div>
+                  {[
+                    ["SMA 50", showSma50, setShowSma50],
+                    ["SMA 200", showSma200, setShowSma200],
+                    ["EMA 9", showEma9, setShowEma9],
+                    ["EMA 21", showEma21, setShowEma21],
+                    ["EMA 50", showEma50, setShowEma50],
+                    ["BB", showBb, setShowBb],
+                    ["VWAP", showVwap, setShowVwap],
+                    ["RSI", showRsi, setShowRsi],
+                    ["MACD", showMacd, setShowMacd],
+                    ["Stoch", showStoch, setShowStoch],
+                    ["ATR", showAtr, setShowAtr],
+                  ].map(([label, val, set]) => (
+                    <label key={label} className={"side-check" + (val ? " on" : "")}>
+                      <input
+                        type="checkbox"
+                        checked={val}
+                        onChange={(e) => set(e.target.checked)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div style={{ position: "relative", width: "100%" }}>
+              <button
+                type="button"
+                title="Overlays"
+                aria-label="Overlays"
+                className={"tool-btn" + (showOverlayBox ? " active" : "")}
+                onClick={() => {
+                  setShowOverlayBox((v) => !v);
+                  if (!showOverlayBox) setShowIndBox(false);
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="7" height="7" rx="1" />
+                </svg>
+              </button>
+              {showOverlayBox ? (
+                <div className="side-flyout" style={{ width: 210 }}>
+                  <div className="side-flyout-title">Overlays</div>
+                  <div className="side-presets">
+                    {[
+                      ["clean", "Clean"],
+                      ["intraday", "Intraday"],
+                      ["scalp", "Scalp"],
+                      ["structure", "Structure"],
+                    ].map(function (p) {
+                      return (
+                        <button
+                          key={p[0]}
+                          type="button"
+                          className={"side-preset" + (overlayPreset === p[0] ? " active" : "")}
+                          onClick={function () {
+                            applyOverlayPreset(p[0]);
+                          }}
+                        >
+                          {p[1]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {[
+                    ["Prior day (PDH/PDL/PDC)", showPriorDay, setShowPriorDay],
+                    ["Live price line", showLiveLine, setShowLiveLine],
+                    ["Setup levels", showSetupLevels, setShowSetupLevels],
+                    ["Long + short structure", showLongShort, setShowLongShort],
+                    ["Book walls", showBookWalls, setShowBookWalls],
+                    ["Liquidity overlay", showLiqOverlay, setShowLiqOverlay],
+                  ].map(function (row) {
+                    return (
+                      <label
+                        key={row[0]}
+                        className={"side-check" + (row[1] ? " on" : "")}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={row[1]}
+                          onChange={function (e) {
+                            row[2](e.target.checked);
+                          }}
+                        />
+                        {row[0]}
+                      </label>
+                    );
+                  })}
+                  <div className="side-flyout-note">
+                    Sessions stay on the Sessions control. Walls use the live book.
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              title="Multi-timeframe split"
+              aria-label="Multi-TF"
+              className={"tool-btn" + (showMultiTf ? " active" : "")}
+              onClick={() =>
+                setShowMultiTf((v) => {
+                  const next = !v;
+                  if (next) setShowCompare(false);
+                  return next;
+                })
+              }
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <rect x="3" y="3" width="8" height="18" rx="1" />
+                <rect x="13" y="3" width="8" height="8" rx="1" />
+                <rect x="13" y="13" width="8" height="8" rx="1" />
+              </svg>
+            </button>
+
+            <div style={{ position: "relative", width: "100%" }}>
+              <button
+                type="button"
+                title="Compare asset"
+                aria-label="Compare"
+                className={"tool-btn" + (showCompare ? " active" : "")}
+                onClick={() => {
+                  setShowCompare((v) => {
+                    const next = !v;
+                    if (next) setShowMultiTf(false);
+                    return next;
+                  });
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M4 6h16" />
+                  <path d="M4 12h10" />
+                  <path d="M4 18h13" />
+                  <path d="M18 10l2 2-2 2" />
+                </svg>
+              </button>
+              {showCompare ? (
+                <div className="side-flyout" style={{ width: 180 }}>
+                  <div className="side-flyout-title">Compare</div>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const next = normalizeSymbol(compareInput);
+                      setCompareSymbol(next);
+                      setCompareInput(displaySymbol(next));
+                    }}
+                    className="side-compare-form"
+                  >
+                    <input
+                      value={compareInput}
+                      onChange={(e) => setCompareInput(e.target.value)}
+                      placeholder="ETH-USD"
+                    />
+                    <button type="submit">Go</button>
+                  </form>
+                  <div className="side-flyout-note">
+                    Same timeframe as main chart. {compareStatus || ""}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div style={{ position: "relative", width: "100%" }}>
+              <button
+                type="button"
+                title="Price alerts"
+                aria-label="Alerts"
+                className={"tool-btn" + (alertsOn ? " active" : "")}
+                onClick={async () => {
+                  if (!alertsOn) {
+                    try {
+                      if (
+                        typeof Notification !== "undefined" &&
+                        Notification.permission === "default"
+                      ) {
+                        await Notification.requestPermission();
+                      }
+                    } catch (_) {}
+                    firedRef.current = {};
+                    lastPriceRef.current = bars.length
+                      ? bars[bars.length - 1].close
+                      : null;
+                    setAlertsOn(true);
+                  } else {
+                    setAlertsOn(false);
+                  }
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                  <path d="M10 18a2 2 0 0 0 4 0" />
+                </svg>
+              </button>
+              {alertsOn && alertLog.length ? (
+                <div className="side-flyout" style={{ width: 220, maxHeight: 220 }}>
+                  <div className="side-flyout-title">Recent alerts</div>
+                  {alertLog.map((a) => (
+                    <div key={a.id} className="side-alert-row">
+                      <div>{a.text}</div>
+                      <div className="side-flyout-note">{a.at}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="draw-divider" />
+
+          {/* —— Drawing tools —— */}
           {TOOL_GROUPS.map((group, gi) => (
             <div key={gi} style={{ display: "contents" }}>
               {gi > 0 && <div className="draw-divider" />}
@@ -3773,103 +3752,7 @@ export default function App() {
             </div>
           ))}
 
-          
           <div className="draw-divider" />
-          <div style={{ position: "relative", width: "100%" }}>
-            <button
-              type="button"
-              title="Indicators"
-              aria-label="Indicators"
-              className={"tool-btn" + (showIndBox ? " active" : "")}
-              onClick={() => {
-                setShowIndBox((v) => !v);
-                if (!showIndBox) {
-                  setShowWatch(false);
-                  setShowLiq(false);
-                  setShowVsBtc(false);
-                  setShowFunding(false);
-                }
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 19V5" />
-                <path d="M4 19h16" />
-                <path d="M8 15v-3" />
-                <path d="M12 15V8" />
-                <path d="M16 15v-5" />
-              </svg>
-            </button>
-            {showIndBox ? (
-              <div
-                style={{
-                  position: "absolute",
-                  left: "calc(100% + 8px)",
-                  top: 0,
-                  zIndex: 500,
-                  width: 168,
-                  maxHeight: 320,
-                  overflowY: "auto",
-                  padding: "6px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(148,163,184,0.22)",
-                  background: "#0f141c",
-                  boxShadow: "0 12px 28px rgba(0,0,0,0.55)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "0.65rem",
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: "#6b7c93",
-                    padding: "2px 6px 6px",
-                  }}
-                >
-                  Indicators
-                </div>
-                {[
-                  ["SMA 50", showSma50, setShowSma50],
-                  ["SMA 200", showSma200, setShowSma200],
-                  ["EMA 9", showEma9, setShowEma9],
-                  ["EMA 21", showEma21, setShowEma21],
-                  ["EMA 50", showEma50, setShowEma50],
-                  ["BB", showBb, setShowBb],
-                  ["VWAP", showVwap, setShowVwap],
-                  ["RSI", showRsi, setShowRsi],
-                  ["MACD", showMacd, setShowMacd],
-                  ["Stoch", showStoch, setShowStoch],
-                  ["ATR", showAtr, setShowAtr],
-                ].map(([label, val, set]) => (
-                  <label
-                    key={label}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "5px 8px",
-                      marginBottom: 2,
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      fontSize: "0.72rem",
-                      color: val ? "#22d3ee" : "#c5d0e0",
-                      fontWeight: val ? 600 : 500,
-                      background: val ? "rgba(34, 211, 238, 0.12)" : "transparent",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={val}
-                      onChange={(e) => set(e.target.checked)}
-                      style={{ accentColor: "#22d3ee", margin: 0 }}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-<div className="draw-divider" />
 
           <button
             type="button"
@@ -3881,7 +3764,7 @@ export default function App() {
               setTrendDraft(null);
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
               <path d="M10 11v6M14 11v6" />

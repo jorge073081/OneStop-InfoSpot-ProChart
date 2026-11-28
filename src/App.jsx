@@ -1710,61 +1710,9 @@ export default function App() {
 
 
   // Price alerts on horizontal drawings — uses live last price; never mutates bars
-  useEffect(() => {
-    if (!alertsOn || !bars.length) return;
-    const price = bars[bars.length - 1].close;
-    if (price == null || !Number.isFinite(price)) return;
 
-    const prev = lastPriceRef.current;
-    lastPriceRef.current = price;
-    if (prev == null || !Number.isFinite(prev) || prev === price) return;
 
-    const levels = drawings.filter(
-      (d) => (d.type === "hline" || d.type === "hline_dot") && Number.isFinite(d.price)
-    );
-    if (!levels.length) return;
 
-    const symLabel = displaySymbol(symbol);
-    const fired = firedRef.current;
-
-    levels.forEach((d) => {
-      const level = d.price;
-      const key = String(d.id || level);
-      // re-arm when price moves away ~0.15% from level
-      const away = Math.abs(price - level) / level > 0.0015;
-      if (away && fired[key]) {
-        delete fired[key];
-      }
-
-      const crossUp = prev < level && price >= level;
-      const crossDown = prev > level && price <= level;
-      if (!crossUp && !crossDown) return;
-      if (fired[key]) return;
-      fired[key] = true;
-
-      const dir = crossUp ? "↑ tag" : "↓ tag";
-      const msg =
-        symLabel +
-        " " +
-        dir +
-        " " +
-        level +
-        " @ " +
-        price;
-      const entry = {
-        id: key + "-" + Date.now(),
-        text: msg,
-        at: new Date().toLocaleTimeString(),
-      };
-      setAlertLog((log) => [entry].concat(log).slice(0, 12));
-
-      try {
-        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          new Notification("Chart Desk alert", { body: msg, tag: key });
-        }
-      } catch (_) {}
-    });
-  }, [bars, drawings, alertsOn, symbol]);
 
   // vs BTC — fetch BTC same TF; compare to chart bars (does not clear chart)
   useEffect(() => {
@@ -2495,6 +2443,143 @@ export default function App() {
     showLiqOverlay,
   ]);
 
+  useEffect(() => {
+    if (!alertsOn || !bars.length) return;
+    const price = bars[bars.length - 1].close;
+    if (price == null || !Number.isFinite(price)) return;
+
+    const prev = lastPriceRef.current;
+    lastPriceRef.current = price;
+    if (prev == null || !Number.isFinite(prev) || prev === price) return;
+
+    const drawLevels = drawings
+      .filter(
+        (d) =>
+          (d.type === "hline" || d.type === "hline_dot") &&
+          Number.isFinite(d.price)
+      )
+      .map((d) => ({
+        id: "draw-" + String(d.id || d.price),
+        price: d.price,
+        label: "H-line",
+      }));
+
+    // Overlay alerts (same sources as chart lines; independent of chartOverlays order)
+    const ovLevels = [];
+    if (showPriorDay) {
+      try {
+        const pd = priorDayLevels(bars);
+        if (pd) {
+          ovLevels.push({ id: "ov-pdh", price: pd.high, label: "PDH" });
+          ovLevels.push({ id: "ov-pdl", price: pd.low, label: "PDL" });
+        }
+      } catch (_) {}
+    }
+    if (showSetupLevels && showSetup && spotSetup && spotSetup.side) {
+      if (Number.isFinite(spotSetup.entryHigh)) {
+        ovLevels.push({
+          id: "ov-setup-entry",
+          price: spotSetup.entryHigh,
+          label: "Setup entry",
+        });
+      }
+      if (Number.isFinite(spotSetup.stop)) {
+        ovLevels.push({
+          id: "ov-setup-stop",
+          price: spotSetup.stop,
+          label: "Setup stop",
+        });
+      }
+    }
+    if (showBookWalls && book) {
+      try {
+        const walls = bookWallLevels(book);
+        walls.forEach(function (w) {
+          if (w.id === "wall-bid-0" || w.id === "wall-ask-0") {
+            ovLevels.push({
+              id: "ov-" + w.id,
+              price: w.price,
+              label: w.title || "Wall",
+            });
+          }
+        });
+      } catch (_) {}
+    }
+
+    const levels = drawLevels.concat(ovLevels);
+    if (!levels.length) return;
+
+    const symLabel = displaySymbol(symbol);
+    const fired = firedRef.current;
+
+    levels.forEach((d) => {
+      const level = d.price;
+      const key = String(d.id || level);
+      const away = Math.abs(price - level) / level > 0.0015;
+      if (away && fired[key]) {
+        delete fired[key];
+      }
+
+      const crossUp = prev < level && price >= level;
+      const crossDown = prev > level && price <= level;
+      if (!crossUp && !crossDown) return;
+      if (fired[key]) return;
+      fired[key] = true;
+
+      const dir = crossUp ? "↑" : "↓";
+      const msg =
+        symLabel +
+        " " +
+        dir +
+        " " +
+        (d.label || "level") +
+        " " +
+        level +
+        " @ " +
+        price;
+      const entry = {
+        id: key + "-" + Date.now(),
+        text: msg,
+        at: new Date().toLocaleTimeString(),
+      };
+      setAlertLog((log) => [entry].concat(log).slice(0, 12));
+
+      try {
+        if (
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted"
+        ) {
+          new Notification("Chart Desk alert", { body: msg, tag: key });
+        }
+      } catch (_) {}
+    });
+  }, [bars, drawings, alertsOn, symbol, showPriorDay, showSetupLevels, showSetup, spotSetup, showBookWalls, book]);
+
+
+
+
+  const overlayLegend = useMemo(() => {
+    const chips = [];
+    if (showPriorDay) chips.push({ id: "pd", label: "PDH/PDL", color: "#f472b6" });
+    if (showLiveLine) chips.push({ id: "live", label: "Live", color: "#e2e8f0" });
+    if (showSetupLevels && showSetup) chips.push({ id: "setup", label: "Setup", color: "#39FF14" });
+    if (showLongShort) chips.push({ id: "ls", label: "L/S", color: "#a78bfa" });
+    if (showBookWalls) chips.push({ id: "walls", label: "Walls", color: "#FF073A" });
+    if (showLiqOverlay) chips.push({ id: "liq", label: "Liquidity", color: "#38bdf8" });
+    if (showSessions) chips.push({ id: "sess", label: "Sessions", color: "#fb923c" });
+    return chips;
+  }, [
+    showPriorDay,
+    showLiveLine,
+    showSetupLevels,
+    showSetup,
+    showLongShort,
+    showBookWalls,
+    showLiqOverlay,
+    showSessions,
+  ]);
+
+
 
 
 
@@ -2516,10 +2601,10 @@ export default function App() {
             aria-label="Symbol"
             title="Press Enter to load"
           />
-          <span className="meta symbol-ticker" title="Last price">
+          <span className="meta symbol-ticker price-box" title="Last price">
             {last ? (
               <>
-                <strong>{last.close}</strong>{" "}
+                <strong className="price-val">{last.close}</strong>
                 {chgPct != null && (
                   <span className={chgPct >= 0 ? "up" : "down"}>
                     {chgSign}
@@ -2528,7 +2613,7 @@ export default function App() {
                 )}
               </>
             ) : (
-              "—"
+              <strong className="price-val">—</strong>
             )}
           </span>
         </form>
@@ -2667,7 +2752,7 @@ export default function App() {
           <button
             type="button"
             className={"interval-btn" + (alertsOn ? " active" : "")}
-            title="Price alerts on horizontal lines"
+            title="Alerts: drawings + PDH/PDL + Setup + walls"
             style={{ fontSize: "0.72rem", padding: "4px 10px" }}
             onClick={async () => {
               if (!alertsOn) {
@@ -3851,6 +3936,22 @@ export default function App() {
           ) : null}
 
           <div className="multi-main">
+          {overlayLegend.length ? (
+            <div className="overlay-legend" aria-label="Active overlays">
+              {overlayLegend.map(function (c) {
+                return (
+                  <span
+                    key={c.id}
+                    className="overlay-chip"
+                    style={{ borderColor: c.color, color: c.color }}
+                  >
+                    {c.label}
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
+
           {bars.length > 0 ? (
             <CandleChart
               bars={bars}

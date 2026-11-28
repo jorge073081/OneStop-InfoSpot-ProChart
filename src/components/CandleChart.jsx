@@ -312,14 +312,15 @@ export default function CandleChart({
       if (tA === tB) {
         tB = snapToValidTime(tA + getBarStep(barsRef.current));
       }
+      const edge = d.color || "rgba(34,211,238,0.9)";
       const top = s.priceChart.addLineSeries({
-        color: "rgba(34,211,238,0.9)",
-        lineWidth: 1,
+        color: edge,
+        lineWidth: d.sessionBand ? 1 : 1,
         lastValueVisible: false,
         priceLineVisible: false,
       });
       const bot = s.priceChart.addLineSeries({
-        color: "rgba(34,211,238,0.9)",
+        color: edge,
         lineWidth: 1,
         lastValueVisible: false,
         priceLineVisible: false,
@@ -334,24 +335,28 @@ export default function CandleChart({
           { time: tB, value: lo },
         ]);
       } catch (_) {}
-      const pl1 = s.candle.createPriceLine({
-        price: hi,
-        color: "rgba(34,211,238,0.45)",
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "R high",
-      });
-      const pl2 = s.candle.createPriceLine({
-        price: lo,
-        color: "rgba(34,211,238,0.45)",
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: "R low",
-      });
-      s.priceLines.push({ id: d.id + "-h", line: pl1 });
-      s.priceLines.push({ id: d.id + "-l", line: pl2 });
+      // Mid guide for session bands (soft horizontal span markers via price lines optional)
+      if (!d.sessionBand) {
+        const soft = d.colorSoft || "rgba(34,211,238,0.45)";
+        const pl1 = s.candle.createPriceLine({
+          price: hi,
+          color: soft,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: "R high",
+        });
+        const pl2 = s.candle.createPriceLine({
+          price: lo,
+          color: soft,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: "R low",
+        });
+        s.priceLines.push({ id: d.id + "-h", line: pl1 });
+        s.priceLines.push({ id: d.id + "-l", line: pl2 });
+      }
       s.trendSeries.push({ id: d.id, series: top, extra: bot });
       return;
     }

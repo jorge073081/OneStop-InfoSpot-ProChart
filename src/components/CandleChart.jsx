@@ -73,6 +73,7 @@ export default function CandleChart({
   onAddDrawing,
   trendDraft,
   onTrendDraft,
+  overlayLevels = [],
 }) {
   const priceRef = useRef(null);
   const rsiRef = useRef(null);
@@ -856,7 +857,10 @@ export default function CandleChart({
     if (!s.candle || !bars || bars.length === 0) return;
 
     const live = drawings.map((d) => d.id);
-    const keepPrice = (id) => live.some((lid) => id === lid || String(id).startsWith(lid + "-"));
+    const keepPrice = (id) => {
+      if (String(id).startsWith("overlay-")) return true;
+      return live.some((lid) => id === lid || String(id).startsWith(lid + "-"));
+    };
 
     s.priceLines = s.priceLines.filter(({ id, line }) => {
       if (keepPrice(id)) return true;
@@ -1090,6 +1094,38 @@ export default function CandleChart({
       }
     }
   }, [bars, showSma50, showSma200, showEma9, showEma21, showEma50, showBb, showVwap, showRsi, showMacd, showStoch, showAtr]);
+
+
+  // Level overlays: setup entry/stop/targets, PDH/PDL, live price
+  useEffect(() => {
+    const s = seriesRef.current;
+    if (!s.candle) return;
+
+    s.priceLines = s.priceLines.filter(({ id, line }) => {
+      if (!String(id).startsWith("overlay-")) return true;
+      try {
+        s.candle.removePriceLine(line);
+      } catch (_) {}
+      return false;
+    });
+
+    const levels = Array.isArray(overlayLevels) ? overlayLevels : [];
+    levels.forEach((lvl) => {
+      if (lvl == null || !Number.isFinite(lvl.price)) return;
+      try {
+        const line = s.candle.createPriceLine({
+          price: lvl.price,
+          color: lvl.color || "#22d3ee",
+          lineWidth: lvl.lineWidth || 1,
+          lineStyle: lvl.lineStyle != null ? lvl.lineStyle : 2,
+          axisLabelVisible: true,
+          title: lvl.title || "",
+        });
+        s.priceLines.push({ id: "overlay-" + String(lvl.id || lvl.title || Math.random()), line });
+      } catch (_) {}
+    });
+  }, [overlayLevels, bars]);
+
 
   return (
     <>

@@ -1157,6 +1157,41 @@ function buildSpotSetup(bars, alignInfo, funding, marketCtx) {
 }
 
 
+
+/** Prior completed UTC day high/low/close from loaded bars (free, accurate). */
+function priorDayLevels(bars) {
+  if (!bars || bars.length < 5) return null;
+  const days = [];
+  let curKey = null;
+  let cur = null;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const key = new Date(b.time * 1000).toISOString().slice(0, 10);
+    if (key !== curKey) {
+      if (cur) days.push(cur);
+      curKey = key;
+      cur = { key, high: b.high, low: b.low, close: b.close, open: b.open };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+    }
+  }
+  if (cur) days.push(cur);
+  if (days.length < 2) {
+    // Daily TF: previous candle is prior day
+    if (bars.length >= 2 && (bars[bars.length - 1].time - bars[bars.length - 2].time) >= 80000) {
+      const p = bars[bars.length - 2];
+      return { high: p.high, low: p.low, close: p.close };
+    }
+    return null;
+  }
+  // Last bucket may be "today" (incomplete); use the one before
+  const prior = days[days.length - 2];
+  return { high: prior.high, low: prior.low, close: prior.close };
+}
+
+
 export default function App() {
 
   const initial = useMemo(() => readParams(), []);
@@ -1965,6 +2000,104 @@ export default function App() {
       };
     }
   }, [showSetup, bars, alignInfo, funding, marketCtx]);
+
+  const chartOverlays = useMemo(() => {
+    const levels = [];
+    const pd = priorDayLevels(bars);
+    if (pd) {
+      levels.push({
+        id: "pdh",
+        price: pd.high,
+        title: "PDH",
+        color: "#f472b6",
+        lineWidth: 1,
+        lineStyle: 2,
+      });
+      levels.push({
+        id: "pdl",
+        price: pd.low,
+        title: "PDL",
+        color: "#38bdf8",
+        lineWidth: 1,
+        lineStyle: 2,
+      });
+      levels.push({
+        id: "pdc",
+        price: pd.close,
+        title: "PDC",
+        color: "#94a3b8",
+        lineWidth: 1,
+        lineStyle: 3,
+      });
+    }
+    const last = bars && bars.length ? bars[bars.length - 1] : null;
+    if (last && Number.isFinite(last.close)) {
+      levels.push({
+        id: "live",
+        price: last.close,
+        title: "Live",
+        color: "#e2e8f0",
+        lineWidth: 1,
+        lineStyle: 0,
+      });
+    }
+    if (showSetup && spotSetup && spotSetup.side) {
+      const isLong = spotSetup.side === "long";
+      if (Number.isFinite(spotSetup.entryLow) && Number.isFinite(spotSetup.entryHigh)) {
+        levels.push({
+          id: "setup-entry-hi",
+          price: spotSetup.entryHigh,
+          title: "Entry",
+          color: isLong ? "#39FF14" : "#FF073A",
+          lineWidth: 2,
+          lineStyle: 0,
+        });
+        if (Math.abs(spotSetup.entryHigh - spotSetup.entryLow) / spotSetup.entryHigh > 0.0005) {
+          levels.push({
+            id: "setup-entry-lo",
+            price: spotSetup.entryLow,
+            title: "Entry lo",
+            color: isLong ? "#39FF14" : "#FF073A",
+            lineWidth: 1,
+            lineStyle: 2,
+          });
+        }
+      }
+      if (Number.isFinite(spotSetup.stop)) {
+        levels.push({
+          id: "setup-stop",
+          price: spotSetup.stop,
+          title: "Stop",
+          color: "#FF073A",
+          lineWidth: 2,
+          lineStyle: 2,
+        });
+      }
+      if (Number.isFinite(spotSetup.t1)) {
+        levels.push({
+          id: "setup-t1",
+          price: spotSetup.t1,
+          title: "T1",
+          color: "#39FF14",
+          lineWidth: 1,
+          lineStyle: 2,
+        });
+      }
+      if (Number.isFinite(spotSetup.t2)) {
+        levels.push({
+          id: "setup-t2",
+          price: spotSetup.t2,
+          title: "T2",
+          color: "#39FF14",
+          lineWidth: 1,
+          lineStyle: 3,
+        });
+      }
+    }
+    return levels;
+  }, [bars, showSetup, spotSetup]);
+
+
 
   const prev = bars[bars.length - 2];
   const chgPct = last && prev ? ((last.close / prev.close - 1) * 100) : null;
@@ -3203,6 +3336,7 @@ export default function App() {
               onAddDrawing={(d) => setDrawings((prev) => [...prev, d])}
               trendDraft={trendDraft}
               onTrendDraft={setTrendDraft}
+              overlayLevels={chartOverlays}
             />
           ) : (
             <div className="chart-panel" style={{ display: "grid", placeItems: "center", color: "#8b9bb4" }}>

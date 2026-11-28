@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 import { sma, ema, rsi, bollinger, macd, stoch, atr, vwap } from "../lib/ohlcv.js";
 
@@ -117,6 +117,8 @@ export default function CandleChart({
   const onAddRef = useRef(onAddDrawing);
   const onDraftRef = useRef(onTrendDraft);
   const isRestoringRef = useRef(false);
+  const [hudInfo, setHudInfo] = useState(null);
+
 
   useEffect(() => {
     barsRef.current = bars;
@@ -501,6 +503,8 @@ export default function CandleChart({
     };
     priceChart.timeScale().subscribeVisibleLogicalRangeChange(saveViewport);
 
+
+
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: COLORS.up,
       downColor: COLORS.down,
@@ -509,6 +513,42 @@ export default function CandleChart({
       wickUpColor: COLORS.up,
       wickDownColor: COLORS.down,
     });
+
+    priceChart.subscribeCrosshairMove((param) => {
+      try {
+        if (!param || !param.time || !param.seriesData) {
+          setHudInfo(null);
+          return;
+        }
+        const raw = param.seriesData.get(candleSeries);
+        if (!raw || raw.close == null) {
+          setHudInfo(null);
+          return;
+        }
+        const list = barsRef.current || [];
+        const first = list[0];
+        const pctOpen =
+          first && first.open
+            ? ((raw.close - first.open) / first.open) * 100
+            : null;
+        const pctBar =
+          raw.open != null && raw.open !== 0
+            ? ((raw.close - raw.open) / raw.open) * 100
+            : null;
+        setHudInfo({
+          time: param.time,
+          open: raw.open,
+          high: raw.high,
+          low: raw.low,
+          close: raw.close,
+          pctBar: pctBar,
+          pctOpen: pctOpen,
+        });
+      } catch (_) {
+        setHudInfo(null);
+      }
+    });
+
 
     const volumeSeries = priceChart.addHistogramSeries({
       priceFormat: { type: "volume" },
@@ -1136,6 +1176,20 @@ export default function CandleChart({
     <>
       <div className="chart-panel">
         <div className="chart-el" ref={priceRef} />
+        {hudInfo ? (
+          <div className="chart-hud">
+            <span className="hud-o">O {Number(hudInfo.open).toPrecision(6)}</span>
+            <span className="hud-h">H {Number(hudInfo.high).toPrecision(6)}</span>
+            <span className="hud-l">L {Number(hudInfo.low).toPrecision(6)}</span>
+            <span className="hud-c">C {Number(hudInfo.close).toPrecision(6)}</span>
+            {hudInfo.pctBar != null ? (
+              <span className={hudInfo.pctBar >= 0 ? "hud-up" : "hud-down"}>
+                {hudInfo.pctBar >= 0 ? "+" : ""}
+                {hudInfo.pctBar.toFixed(2)}%
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {showRsi ? (
         <div className="chart-panel rsi">

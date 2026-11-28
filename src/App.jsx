@@ -1387,6 +1387,102 @@ function structureLongShortLevels(bars) {
 }
 
 
+
+/** High-volume price nodes from recent candles (liquidity proxy from your OHLCV). */
+function volumeLiquidityLevels(bars) {
+  if (!bars || bars.length < 20) return [];
+  const slice = bars.slice(-80);
+  // Bucket by rough price step from ATR-ish range
+  let lo = slice[0].low;
+  let hi = slice[0].high;
+  for (let i = 1; i < slice.length; i++) {
+    if (slice[i].low < lo) lo = slice[i].low;
+    if (slice[i].high > hi) hi = slice[i].high;
+  }
+  const range = hi - lo || 1;
+  const buckets = 24;
+  const step = range / buckets;
+  const vol = new Array(buckets).fill(0);
+  const mid = new Array(buckets).fill(0);
+  for (let i = 0; i < slice.length; i++) {
+    const b = slice[i];
+    const px = (b.high + b.low + b.close) / 3;
+    let idx = Math.floor((px - lo) / step);
+    if (idx < 0) idx = 0;
+    if (idx >= buckets) idx = buckets - 1;
+    vol[idx] += b.volume || 0;
+    mid[idx] = lo + (idx + 0.5) * step;
+  }
+  let maxV = 0;
+  for (let i = 0; i < buckets; i++) if (vol[i] > maxV) maxV = vol[i];
+  if (!(maxV > 0)) return [];
+  const levels = [];
+  for (let i = 0; i < buckets; i++) {
+    const strength = vol[i] / maxV;
+    if (strength < 0.55) continue; // only stronger nodes
+    levels.push({
+      id: "liq-vol-" + i,
+      price: mid[i],
+      title: strength >= 0.85 ? "HVN" : "Vol",
+      color: strength >= 0.85 ? "rgba(34,211,238,0.95)" : "rgba(34,211,238,0.45)",
+      lineWidth: strength >= 0.85 ? 2 : 1,
+      lineStyle: 2,
+    });
+  }
+  return levels.slice(0, 8);
+}
+
+/** Deeper book liquidity (more levels than walls), size-weighted. */
+function bookLiquidityLevels(book) {
+  if (!book || !book.bids || !book.asks) return [];
+  const levels = [];
+  const bids = book.bids
+    .slice()
+    .sort(function (a, b) {
+      return b.size - a.size;
+    })
+    .slice(0, 6);
+  const asks = book.asks
+    .slice()
+    .sort(function (a, b) {
+      return b.size - a.size;
+    })
+    .slice(0, 6);
+  let maxS = 0.0001;
+  bids.forEach(function (b) {
+    if (b.size > maxS) maxS = b.size;
+  });
+  asks.forEach(function (b) {
+    if (b.size > maxS) maxS = b.size;
+  });
+  bids.forEach(function (b, i) {
+    if (!Number.isFinite(b.price)) return;
+    const w = b.size / maxS;
+    levels.push({
+      id: "liq-bid-" + i,
+      price: b.price,
+      title: w > 0.7 ? "Bid liq" : "",
+      color: "rgba(57,255,20," + (0.25 + w * 0.6).toFixed(2) + ")",
+      lineWidth: w > 0.7 ? 2 : 1,
+      lineStyle: 2,
+    });
+  });
+  asks.forEach(function (b, i) {
+    if (!Number.isFinite(b.price)) return;
+    const w = b.size / maxS;
+    levels.push({
+      id: "liq-ask-" + i,
+      price: b.price,
+      title: w > 0.7 ? "Ask liq" : "",
+      color: "rgba(255,7,58," + (0.25 + w * 0.6).toFixed(2) + ")",
+      lineWidth: w > 0.7 ? 2 : 1,
+      lineStyle: 2,
+    });
+  });
+  return levels;
+}
+
+
 export default function App() {
 
   const initial = useMemo(() => readParams(), []);
@@ -1416,6 +1512,7 @@ export default function App() {
   const [showLiveLine, setShowLiveLine] = useState(true);
   const [showSetupLevels, setShowSetupLevels] = useState(true);
   const [showLongShort, setShowLongShort] = useState(false);
+  const [showLiqOverlay, setShowLiqOverlay] = useState(false);
   const [book, setBook] = useState(null);
   const [bookStatus, setBookStatus] = useState("");
   const [showVsBtc, setShowVsBtc] = useState(false);
@@ -1529,7 +1626,7 @@ export default function App() {
 
   // Order book liquidity panel — only while open; never touches chart bars
   useEffect(() => {
-    if (!showLiq && !showBookWalls) return undefined;
+    if (!showLiq && !showBookWalls && !showLiqOverlay) return undefined;
     let cancelled = false;
     let timer = null;
 
@@ -1556,7 +1653,7 @@ export default function App() {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [symbol, showLiq, showBookWalls]);
+  }, [symbol, showLiq, showBookWalls, showLiqOverlay]);
 
 
   // Price alerts on horizontal drawings — uses live last price; never mutates bars
@@ -2315,6 +2412,16 @@ export default function App() {
         for (let i = 0; i < walls.length; i++) levels.push(walls[i]);
       } catch (_) {}
     }
+    if (showLiqOverlay) {
+      try {
+        const hvn = volumeLiquidityLevels(bars);
+        for (let i = 0; i < hvn.length; i++) levels.push(hvn[i]);
+      } catch (_) {}
+      try {
+        const depth = bookLiquidityLevels(book);
+        for (let i = 0; i < depth.length; i++) levels.push(depth[i]);
+      } catch (_) {}
+    }
     return levels;
   }, [
     bars,
@@ -2326,6 +2433,7 @@ export default function App() {
     showLiveLine,
     showSetupLevels,
     showLongShort,
+    showLiqOverlay,
   ]);
 
 
@@ -2676,6 +2784,7 @@ export default function App() {
                 ["Setup levels", showSetupLevels, setShowSetupLevels],
                 ["Long + short structure", showLongShort, setShowLongShort],
                 ["Book walls", showBookWalls, setShowBookWalls],
+                ["Liquidity overlay", showLiqOverlay, setShowLiqOverlay],
               ].map(function (row) {
                 const label = row[0];
                 const val = row[1];
@@ -2718,8 +2827,8 @@ export default function App() {
                   lineHeight: 1.35,
                 }}
               >
-                Setup levels need the Setup panel bias. Sessions stay on the Sessions
-                button. Walls use the live order book.
+                Liquidity = high-volume nodes from candles + deeper book levels.
+                Not liquidation data. Sessions stay on the Sessions button.
               </div>
             </div>
           ) : null}

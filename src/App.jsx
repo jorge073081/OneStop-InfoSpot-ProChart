@@ -1526,11 +1526,46 @@ export default function App() {
   const [showLiq, setShowLiq] = useState(false);
   const [showBookWalls, setShowBookWalls] = useState(false);
   const [showOverlayBox, setShowOverlayBox] = useState(false);
-  const [showPriorDay, setShowPriorDay] = useState(true);
-  const [showLiveLine, setShowLiveLine] = useState(true);
-  const [showSetupLevels, setShowSetupLevels] = useState(true);
+  const [showPriorDay, setShowPriorDay] = useState(false);
+  const [showLiveLine, setShowLiveLine] = useState(false);
+  const [showSetupLevels, setShowSetupLevels] = useState(false);
   const [showLongShort, setShowLongShort] = useState(false);
   const [showLiqOverlay, setShowLiqOverlay] = useState(false);
+  const [overlayPreset, setOverlayPreset] = useState("clean");
+
+  const applyOverlayPreset = (name) => {
+    setOverlayPreset(name);
+    if (name === "clean") {
+      setShowPriorDay(false);
+      setShowLiveLine(false);
+      setShowSetupLevels(false);
+      setShowLongShort(false);
+      setShowBookWalls(false);
+      setShowLiqOverlay(false);
+    } else if (name === "intraday") {
+      setShowPriorDay(true);
+      setShowLiveLine(true);
+      setShowSetupLevels(false);
+      setShowLongShort(false);
+      setShowBookWalls(false);
+      setShowLiqOverlay(false);
+    } else if (name === "scalp") {
+      setShowPriorDay(false);
+      setShowLiveLine(true);
+      setShowSetupLevels(false);
+      setShowLongShort(false);
+      setShowBookWalls(true);
+      setShowLiqOverlay(true);
+    } else if (name === "structure") {
+      setShowPriorDay(true);
+      setShowLiveLine(true);
+      setShowSetupLevels(true);
+      setShowLongShort(true);
+      setShowBookWalls(false);
+      setShowLiqOverlay(false);
+    }
+  };
+
   const [book, setBook] = useState(null);
   const [bookStatus, setBookStatus] = useState("");
   const [showVsBtc, setShowVsBtc] = useState(false);
@@ -2802,6 +2837,39 @@ export default function App() {
               >
                 Overlays
               </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 4,
+                  marginBottom: 8,
+                }}
+              >
+                {[
+                  ["clean", "Clean"],
+                  ["intraday", "Intraday"],
+                  ["scalp", "Scalp"],
+                  ["structure", "Structure"],
+                ].map(function (p) {
+                  const id = p[0];
+                  const label = p[1];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={
+                        "interval-btn" + (overlayPreset === id ? " active" : "")
+                      }
+                      style={{ fontSize: "0.65rem", padding: "3px 7px" }}
+                      onClick={function () {
+                        applyOverlayPreset(id);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
               {[
                 ["Prior day (PDH/PDL/PDC)", showPriorDay, setShowPriorDay],
                 ["Live price line", showLiveLine, setShowLiveLine],
@@ -3834,7 +3902,13 @@ export default function App() {
       <footer className={`status${error ? " error" : ""}`}>
         {error || (
           <>
-            <span style={{ color: liveState.startsWith("● LIVE") ? "#39FF14" : "#8b9bb4", fontWeight: 600 }}>
+            <span
+              className={liveState.startsWith("● LIVE") ? "live-pulse" : ""}
+              style={{
+                color: liveState.startsWith("● LIVE") ? "#39FF14" : "#8b9bb4",
+                fontWeight: 600,
+              }}
+            >
               {liveState}
             </span>
             {" · "}

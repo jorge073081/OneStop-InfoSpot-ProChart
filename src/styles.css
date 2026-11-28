@@ -427,3 +427,25 @@ select {
 .tool-btn.active {
   box-shadow: 0 0 8px rgba(34, 211, 238, 0.25);
 }
+
+/* Dropdowns above chart */
+.topbar {
+  position: relative;
+  z-index: 200;
+  overflow: visible;
+}
+
+.workspace {
+  position: relative;
+  z-index: 1;
+}
+
+.chart-panel {
+  z-index: 1;
+}
+
+.topbar .interval-btn,
+.topbar .symbol-form {
+  position: relative;
+  z-index: 201;
+}

@@ -3185,6 +3185,8 @@ export default function App() {
           {bars.length > 0 ? (
             <CandleChart
               bars={bars}
+              symbol={symbol}
+              interval={interval}
               showSma50={showSma50}
               showSma200={showSma200}
               showEma9={showEma9}
@@ -3230,7 +3232,7 @@ export default function App() {
       <footer className={`status${error ? " error" : ""}`}>
         {error || (
           <>
-            <span style={{ color: liveState.startsWith("● LIVE") ? "#26a69a" : "#8b9bb4", fontWeight: 600 }}>
+            <span style={{ color: liveState.startsWith("● LIVE") ? "#39FF14" : "#8b9bb4", fontWeight: 600 }}>
               {liveState}
             </span>
             {" · "}

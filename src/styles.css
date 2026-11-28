@@ -339,3 +339,14 @@ select {
     min-height: 200px;
   }
 }
+
+.symbol-form .symbol-ticker {
+  margin-left: 4px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.symbol-form .symbol-ticker strong {
+  color: var(--text);
+  font-weight: 600;
+}

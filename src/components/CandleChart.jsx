@@ -1123,7 +1123,7 @@ export default function CandleChart({
           color: lvl.color || "#22d3ee",
           lineWidth: lvl.lineWidth || 1,
           lineStyle: lvl.lineStyle != null ? lvl.lineStyle : 2,
-          axisLabelVisible: true,
+          axisLabelVisible: lvl.axisLabelVisible !== false && !!(lvl.title),
           title: lvl.title || "",
         });
         s.priceLines.push({ id: "overlay-" + String(lvl.id || lvl.title || Math.random()), line });

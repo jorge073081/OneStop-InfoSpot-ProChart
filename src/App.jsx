@@ -1192,6 +1192,114 @@ function priorDayLevels(bars) {
 }
 
 
+
+/** Session background zones (London / NY) as rect overlays — free, time-based. */
+function buildSessionBands(bars, interval) {
+  if (!bars || bars.length < 2) return [];
+  if (interval === "1d" || interval === "1w") return [];
+
+  const tFirst = bars[0].time;
+  const tLast = bars[bars.length - 1].time;
+  const d0 = new Date(tFirst * 1000);
+  let day =
+    Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()) / 1000;
+  const end = tLast + 86400;
+  const out = [];
+
+  function rangeHL(t0, t1) {
+    let hi = null;
+    let lo = null;
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i];
+      if (b.time < t0 || b.time > t1) continue;
+      hi = hi == null ? b.high : Math.max(hi, b.high);
+      lo = lo == null ? b.low : Math.min(lo, b.low);
+    }
+    return hi != null ? { hi: hi, lo: lo } : null;
+  }
+
+  while (day <= end && out.length < 40) {
+    const lon0 = day + 8 * 3600;
+    const lon1 = day + 16 * 3600;
+    const ny0 = day + 13 * 3600 + 30 * 60;
+    const ny1 = day + 20 * 3600;
+
+    if (lon1 >= tFirst && lon0 <= tLast) {
+      const hl = rangeHL(lon0, lon1);
+      if (hl) {
+        out.push({
+          id: "sess-band-lon-" + day,
+          type: "rect",
+          t1: lon0,
+          t2: lon1,
+          p1: hl.lo,
+          p2: hl.hi,
+          sessionBand: true,
+          color: "rgba(167,139,250,0.55)",
+        });
+      }
+    }
+    if (ny1 >= tFirst && ny0 <= tLast) {
+      const hl = rangeHL(ny0, ny1);
+      if (hl) {
+        out.push({
+          id: "sess-band-ny-" + day,
+          type: "rect",
+          t1: ny0,
+          t2: ny1,
+          p1: hl.lo,
+          p2: hl.hi,
+          sessionBand: true,
+          color: "rgba(251,146,60,0.5)",
+        });
+      }
+    }
+    day += 86400;
+  }
+  return out;
+}
+
+function bookWallLevels(book) {
+  if (!book || !book.bids || !book.asks) return [];
+  const levels = [];
+  const bids = book.bids
+    .slice()
+    .sort(function (a, b) {
+      return b.size - a.size;
+    })
+    .slice(0, 3);
+  const asks = book.asks
+    .slice()
+    .sort(function (a, b) {
+      return b.size - a.size;
+    })
+    .slice(0, 3);
+  bids.forEach(function (b, i) {
+    if (!Number.isFinite(b.price)) return;
+    levels.push({
+      id: "wall-bid-" + i,
+      price: b.price,
+      title: i === 0 ? "Bid wall" : "Bid",
+      color: "#39FF14",
+      lineWidth: i === 0 ? 2 : 1,
+      lineStyle: 2,
+    });
+  });
+  asks.forEach(function (b, i) {
+    if (!Number.isFinite(b.price)) return;
+    levels.push({
+      id: "wall-ask-" + i,
+      price: b.price,
+      title: i === 0 ? "Ask wall" : "Ask",
+      color: "#FF073A",
+      lineWidth: i === 0 ? 2 : 1,
+      lineStyle: 2,
+    });
+  });
+  return levels;
+}
+
+
 export default function App() {
 
   const initial = useMemo(() => readParams(), []);
@@ -1328,7 +1436,6 @@ export default function App() {
 
   // Order book liquidity panel — only while open; never touches chart bars
   useEffect(() => {
-    if (!showLiq) return undefined;
     let cancelled = false;
     let timer = null;
 
@@ -1340,7 +1447,9 @@ export default function App() {
         setBook(data);
         setBookStatus((data.source || "book") + " · " + new Date().toLocaleTimeString());
       } catch (e) {
-        if (!cancelled) setBookStatus(e.message || "Book unavailable");
+        if (!cancelled) {
+          setBookStatus(e.message || "Book unavailable");
+        }
       }
     };
 
@@ -1353,7 +1462,7 @@ export default function App() {
       cancelled = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [showLiq, symbol]);
+  }, [symbol]);
 
 
   // Price alerts on horizontal drawings — uses live last price; never mutates bars
@@ -1966,7 +2075,9 @@ export default function App() {
     if (!showSessions) return [];
     if (interval === "1d" || interval === "1w") return [];
     try {
-      return buildSessionMarkers(bars, interval);
+      const marks = buildSessionMarkers(bars, interval);
+      const bands = buildSessionBands(bars, interval);
+      return marks.concat(bands);
     } catch (_) {
       return [];
     }
@@ -2094,8 +2205,13 @@ export default function App() {
         });
       }
     }
+    // Order-book walls (largest bid/ask sizes) — real depth, not liquidations
+    try {
+      const walls = bookWallLevels(book);
+      for (let i = 0; i < walls.length; i++) levels.push(walls[i]);
+    } catch (_) {}
     return levels;
-  }, [bars, showSetup, spotSetup]);
+  }, [bars, showSetup, spotSetup, book]);
 
 
 
